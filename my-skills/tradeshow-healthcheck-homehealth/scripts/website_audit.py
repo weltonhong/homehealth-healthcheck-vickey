@@ -130,6 +130,39 @@ def find_internal_link_by_path(html, base_url, paths):
     return None
 
 
+def fetch_aux_pages(home_html, base_url, paths, timeout=8):
+    """Crawl one level deep on the given paths. For each path:
+      1. Try to find a matching href on the homepage (loose substring match).
+      2. If not found, try the path directly via HEAD probe on the base URL.
+    Returns list of (final_url, html) tuples for pages that fetched 2xx.
+    Deduped by final URL.
+
+    This is the helper that lets the Medicare-cert / services / referral
+    checks see the linked sub-pages even when the homepage doesn't surface
+    a clean href to them. Most HH agencies put 'Medicare-certified' or
+    their service catalog on /services or /about-us, not above the fold."""
+    if not base_url:
+        return []
+    pages = []
+    seen = set()
+    for path in paths:
+        url = (
+            find_internal_link(home_html or "", base_url, [path])
+            or find_internal_link_by_path(home_html or "", base_url, [path])
+        )
+        if not url:
+            continue
+        # Normalize: strip trailing slash, lowercase host for dedup
+        key = url.rstrip("/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        page_html, status, final_url = fetch_page(url, timeout=timeout)
+        if page_html and status and 200 <= status < 300:
+            pages.append((final_url or url, page_html))
+    return pages
+
+
 # ----------------------------- 1. Real photos vs stock -----------------------------
 
 STOCK_INDICATORS = [
@@ -354,33 +387,48 @@ def check_google_reviews_widget(html):
 
 # ----------------------------- 7. Medicare-certified mention -----------------------------
 
+# Most Medicare-certified HH agencies use one of these phrases somewhere
+# on their site (homepage, About, Services, How We Work, Credentials,
+# or Accreditation pages). Including accreditor names like CHAP, ACHC,
+# and the Joint Commission since many agencies advertise the accreditor
+# rather than spelling out "Medicare-certified".
 MEDICARE_CERT_PATTERNS = [
-    r"medicare[\s\-]*certified",
+    r"medicare[\s\-]+certified",
     r"medicare\s+certification",
     r"certified\s+by\s+medicare",
-    r"cms[\s\-]*certified",
+    r"medicare[\s\-]+approved",
+    r"medicare\s+provider",
+    r"cms[\s\-]+certified",
     r"certified\s+by\s+(?:cms|medicare)",
+    # Accreditation bodies whose certification is functionally equivalent
+    r"chap[\s\-]+accredit\w*",
+    r"chap\s+accreditation",
+    r"community\s+health\s+accreditation\s+(?:program|partner)",
+    r"achc[\s\-]+accredit\w*",
+    r"achc\s+accreditation",
+    r"accreditation\s+commission\s+for\s+health\s+care",
+    r"joint\s+commission[\s\-]+accredit\w*",
+    r"joint\s+commission\s+accreditation",
+    r"accredited\s+by\s+(?:chap|achc|the\s+joint\s+commission)",
 ]
-MEDICARE_URL_KEYWORDS = [
+MEDICARE_AUX_PATHS = [
     "/medicare", "/certifications", "/certification", "/our-credentials",
-    "/credentials", "/about", "/services",
+    "/credentials", "/accreditation", "/accreditations",
+    "/about", "/about-us", "/our-story", "/who-we-are",
+    "/services", "/our-services", "/what-we-do",
+    "/how-we-work", "/why-choose-us", "/why-us", "/quality",
+    "/quality-of-care", "/our-difference",
 ]
 
 
 def check_medicare_certified(home_html, base_url):
-    """Pass if 'Medicare certified' or close variant appears on homepage,
-    /about, or /services. Discharge planners and savvy families look for
-    this signal explicitly."""
-    pages_text = []
-    pages_text.append(home_html or "")
-
-    for kw in MEDICARE_URL_KEYWORDS:
-        u = find_internal_link(home_html or "", base_url, [kw])
-        if not u:
-            continue
-        page_html, status, _ = fetch_page(u, timeout=8)
-        if page_html and status and 200 <= status < 300:
-            pages_text.append(page_html)
+    """Pass if 'Medicare-certified' (or any of the equivalent accreditation
+    phrases) appears on the homepage OR on any of the aux pages we crawl
+    one level deep. Discharge planners and savvy families look for this
+    signal explicitly, but agencies rarely place it above the fold."""
+    pages_text = [home_html or ""]
+    for _, page_html in fetch_aux_pages(home_html or "", base_url, MEDICARE_AUX_PATHS):
+        pages_text.append(page_html)
 
     blob = " ".join(pages_text).lower()
     blob = re.sub(r"<[^>]+>", " ", blob)
@@ -412,9 +460,13 @@ HH_SERVICES = [
     "cardiac care", "ckd care", "ostomy",
 ]
 
-SERVICES_URL_KEYWORDS = [
+SERVICES_AUX_PATHS = [
     "/services", "/our-services", "/what-we-do", "/care", "/care-services",
-    "/programs", "/specialties",
+    "/programs", "/program", "/specialties", "/specialty",
+    "/skilled-nursing", "/therapy", "/therapies",
+    "/conditions", "/conditions-we-treat",
+    # Many HH sites list services on the home / about pages too
+    "/about", "/about-us",
 ]
 
 
@@ -432,15 +484,14 @@ def detect_services(html):
 
 
 def check_services_list(home_html, base_url):
-    """Pass if 4+ distinct service categories detected across homepage +
-    /services page."""
+    """Pass if 4+ distinct service categories detected across homepage AND
+    any service-related sub-pages we crawl one level deep. Many HH sites
+    have a /services landing page with the actual service list while the
+    homepage only mentions one or two."""
     found = set(detect_services(home_html))
 
-    sub_url = find_internal_link(home_html or "", base_url, SERVICES_URL_KEYWORDS)
-    if sub_url:
-        page_html, status, _ = fetch_page(sub_url, timeout=10)
-        if page_html and status and 200 <= status < 300:
-            found.update(detect_services(page_html))
+    for _, page_html in fetch_aux_pages(home_html or "", base_url, SERVICES_AUX_PATHS, timeout=10):
+        found.update(detect_services(page_html))
 
     # Bucket related terms so we count distinct disciplines, not synonyms
     buckets = {
@@ -466,42 +517,38 @@ def check_services_list(home_html, base_url):
 
 # ----------------------------- 9. Referral source page -----------------------------
 
-REFERRAL_URL_KEYWORDS = [
+REFERRAL_AUX_PATHS = [
     "/refer", "/referral", "/referrals", "/refer-a-patient",
     "/refer-patient", "/physician-referral", "/physicians",
     "/for-physicians", "/for-providers", "/providers",
     "/discharge-planners", "/case-managers", "/case-management",
-    "/healthcare-professionals", "/professionals", "/partners",
-    "/hospital-partners",
-]
-REFERRAL_PATH_FALLBACKS = [
-    "/refer", "/referral", "/referrals", "/refer-a-patient",
-    "/physician-referral", "/for-physicians", "/for-providers",
-    "/discharge-planners",
+    "/healthcare-professionals", "/healthcare-pros", "/professionals",
+    "/clinicians", "/clinician",
+    "/partners", "/hospital-partners", "/our-partners",
 ]
 REFERRAL_BODY_HINTS = [
     "refer a patient", "patient referral", "physician referral",
-    "discharge planner", "discharge planners", "case manager",
-    "case managers", "for hospitals", "for physicians", "for providers",
+    "make a referral", "submit a referral",
+    "discharge planner", "discharge planners",
+    "case manager", "case managers",
+    "for hospitals", "for physicians", "for providers",
+    "for healthcare professionals", "for clinicians",
     "hospital partners", "snf partners", "skilled nursing facility",
-    "for healthcare professionals", "make a referral",
 ]
 
 
 def check_referral_page(home_html, base_url):
-    """Pass if there's a dedicated referral page reachable from the
-    homepage OR if referral language is prominent on the homepage. Most
-    HH revenue comes from referral sources, not family self-referrals."""
-    ref_url = (
-        find_internal_link(home_html or "", base_url, REFERRAL_URL_KEYWORDS)
-        or find_internal_link_by_path(home_html or "", base_url, REFERRAL_PATH_FALLBACKS)
-    )
-    if ref_url:
-        page_html, status, _ = fetch_page(ref_url, timeout=10)
-        if page_html and status and 200 <= status < 300:
-            return True
+    """Pass if there's a dedicated referral page reachable via homepage
+    href OR direct path probe, OR if referral language is prominent
+    across the homepage and any aux pages we crawl. Most HH revenue
+    comes from referral sources, not family self-referrals — missing
+    this is a real revenue gap."""
+    aux_pages = fetch_aux_pages(home_html or "", base_url, REFERRAL_AUX_PATHS, timeout=10)
+    if aux_pages:
+        # Any referral-named page that fetches 2xx is a pass.
+        return True
 
-    # Fallback: prominent referral copy on the homepage
+    # Fallback: prominent referral copy on the homepage (>=2 hints)
     if home_html:
         text = re.sub(r"<[^>]+>", " ", home_html).lower()
         text = re.sub(r"\s+", " ", text)
