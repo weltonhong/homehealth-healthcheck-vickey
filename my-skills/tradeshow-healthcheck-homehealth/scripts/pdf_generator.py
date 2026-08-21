@@ -303,7 +303,14 @@ def estimate_lost_intakes(results):
             geo_city = cities[0] if cities else ""
         pop = get_city_population(geo_city, state)
         mult = _pop_multiplier(pop)
-        if not (pack_results.get(label) or {}).get("in_3_pack"):
+        pack_c = pack_results.get(label) or {}
+        # An unscanned bucket contributes NOTHING. Charging it as a missed
+        # 3-Pack would put an invented number on a branded PDF handed to a
+        # prospect. Its ads data came from the same failed fetch, so the whole
+        # bucket is skipped.
+        if pack_c.get("error"):
+            continue
+        if not pack_c.get("in_3_pack"):
             low += 4 * mult
             high += 8 * mult
         d = ads_per_bucket.get(label) or {}
@@ -321,6 +328,41 @@ def estimate_lost_intakes(results):
         high *= 1.2
 
     return int(round(low)), int(round(high))
+
+
+# Map-pack rows carry THREE states, not two, and the difference decides
+# whether anything may be said about the prospect.
+#
+#   UNSCANNED          the fetch failed. Neither a finding nor a non-finding.
+#   NO_PACK            Google served no local pack for that search at all.
+#                      There is nothing to be absent from, so it is not a gap
+#                      and no competitor "owns the map" there.
+#   IN_PACK            the prospect is in it.
+#   ABSENT_FROM_PACK   a pack exists and the prospect is not in it. The only
+#                      one of the four that is a finding about the prospect.
+#
+# `in_3_pack` alone cannot tell NO_PACK from ABSENT_FROM_PACK: it is False for
+# both. Every selector below keys on this function instead.
+UNSCANNED = "UNSCANNED"
+NO_PACK = "NO_PACK"
+IN_PACK = "IN_PACK"
+ABSENT_FROM_PACK = "ABSENT_FROM_PACK"
+
+
+def pack_status(pack_row):
+    """Which of the four states this map-pack row is in."""
+    row = pack_row or {}
+    if row.get("error"):
+        return UNSCANNED
+    if row.get("in_3_pack"):
+        return IN_PACK
+    if not [t for t in (row.get("top_3") or []) if t]:
+        # No pack was served. Measured 2026-08-20 across 27 real
+        # vertical/market queries: a genuinely packless search did not occur
+        # once, so this state is almost always a measurement problem rather
+        # than a fact about the market. Either way it is not a gap.
+        return NO_PACK
+    return ABSENT_FROM_PACK
 
 
 def build_adaptive_hook(results, overall, low, high):
@@ -347,13 +389,22 @@ def build_adaptive_hook(results, overall, low, high):
         winning = []
         losing = []
         for label in bucket_labels:
-            in_pack = (pack_results.get(label) or {}).get("in_3_pack")
-            seo_rank = (seo.get(label) or {}).get("rank")
-            in_seo = seo_rank is not None and seo_rank <= 10
-            if in_pack or in_seo:
+            pack_c = pack_results.get(label) or {}
+            seo_c = seo.get(label) or {}
+            # PER AXIS. The old guard skipped only when BOTH axes errored, so a
+            # row with an unscanned SEO and no map pack landed in `losing` on
+            # zero measurement and was named in the headline as somewhere
+            # competitors are found instead of the prospect.
+            status = pack_status(pack_c)
+            seo_measured = not seo_c.get("error")
+            seo_rank = seo_c.get("rank")
+            in_seo = seo_measured and seo_rank is not None and seo_rank <= 10
+            seo_gap = seo_measured and not in_seo
+            if status == IN_PACK or in_seo:
                 winning.append(label)
-            else:
+            elif status == ABSENT_FROM_PACK or seo_gap:
                 losing.append(label)
+            # Otherwise nothing was measurable on either axis: neither column.
 
         if winning and losing:
             win_lab = winning[0]
@@ -426,9 +477,17 @@ def _build_recommendations_top2(results):
     candidates = []
 
     # ----- 3-Pack: name the agencies that own the map ------------------
+    # Unscanned buckets excluded: naming a competitor as owning the map for a
+    # search whose SERP never came back is a fabricated finding, and it also
+    # inflates the score below.
+    # ABSENT_FROM_PACK only, which means every entry is guaranteed to
+    # have a top_3 to name. The old list also admitted rows where no
+    # pack existed; because the consumer below took [0] and gave up if
+    # it had no top_3, a single packless home city SUPPRESSED the whole
+    # bullet -- and with it two genuine, nameable gaps in other cities.
     missing_packs = [
         b for b in bucket_labels
-        if not (pack_results.get(b) or {}).get("in_3_pack")
+        if pack_status(pack_results.get(b)) == ABSENT_FROM_PACK
     ]
     if missing_packs:
         target_bucket = missing_packs[0]
@@ -758,19 +817,29 @@ def build_pdf(results):
 
     pack_results = pack.get("results") or {}
 
-    def pack_status(d):
+    def pack_cell(d):
+        """The display string for one map-pack row.
+
+        NOT the module-level pack_status, which returns a STATE. Two
+        functions of one name in one file, returning different kinds of
+        thing, is a trap for the next reader; this one is the renderer.
+        """
         if not d or "error" in d:
             return "ERROR"
         top_3 = d.get("top_3") or []
         if not top_3:
-            return "No local map pack found for this bucket"
+            if d.get("confirmed_empty"):
+                return "Google shows no map pack for this search"
+            # Not confirmed. Deliberately says nothing about the prospect:
+            # a rep reads this row out loud to them.
+            return "Map results unconfirmed for this search"
         top_3_str = ", ".join(top_3[:3])
         if d.get("in_3_pack"):
             return f"FOUND rank {d.get('rank')} (Top 3: {top_3_str})"
         return f"NOT FOUND (Top 3: {top_3_str})"
 
     pack_lines_html = [
-        f"<b>{label}:</b> {pack_status(pack_results.get(label))}"
+        f"<b>{label}:</b> {pack_cell(pack_results.get(label))}"
         for label in bucket_labels
     ]
     pack_detail = "<br/>".join(pack_lines_html) or "No data"
@@ -790,6 +859,12 @@ def build_pdf(results):
         rank = d.get("rank")
         top_3 = d.get("top_3") or []
         cleaned = [trim_title(t) for t in top_3[:3] if t]
+        if d.get("error"):
+            # The prospect is handed this PDF. A failed fetch must not appear
+            # on it as a finding about their rankings.
+            seo_lines_html.append(
+                f"<b>{label}:</b> ERROR ({str(d.get('error'))[:60]})")
+            continue
         if not cleaned:
             seo_lines_html.append(
                 f"<b>{label}:</b> No organic results found for this bucket"
@@ -853,7 +928,12 @@ def build_pdf(results):
         if d.get("prospect_running_ads"):
             business_running_anywhere = True
         advs = (d.get("all_advertisers") or [])[:3]
-        if advs:
+        if d.get("error"):
+            # The prospect is handed this PDF. A failed fetch must not appear
+            # on it as a finding about their advertising.
+            ads_lines.append(
+                f"<b>{label}:</b> ERROR ({str(d.get('error'))[:60]})")
+        elif advs:
             ads_lines.append(f"<b>{label}:</b> {', '.join(advs)}")
         else:
             ads_lines.append(f"<b>{label}:</b> No ads detected (open lane)")
