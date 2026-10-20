@@ -60,6 +60,7 @@ import website_audit  # noqa: E402
 import map_identity  # noqa: E402  (which map card is the prospect)
 import organic_names  # noqa: E402  (real names in the organic Top 3)
 import listing_confirm  # noqa: E402  (the rep confirms the business's own listing)
+import ads_words  # noqa: E402  (what the sheet may say about their ads)
 import name_matcher  # noqa: E402
 
 
@@ -826,13 +827,19 @@ def build_ads_per_bucket(business, competitors, seo_per_bucket, prospect_website
                     prospect_match = (adv or {}).get("name", ad_domain)
                     break
         # 2) Name-based fallback when domain field is empty
+        # 2) A name alone is not proof (Welton 2026-10-20; prospect_identity's rule). An ad under their
+        # name with no readable link, or when their own site is unknown, MAY be theirs: never "seen",
+        # never "not seen" (scripts/ads_words.py). An ad whose link is known and is not theirs is not.
+        prospect_maybe = None
         if not prospect_match and business:
             for adv in ads_list:
                 adv_name = (adv or {}).get("name", "")
                 if not adv_name:
                     continue
+                if prospect_domain and normalize_domain((adv or {}).get("domain", "")):
+                    continue
                 if name_matcher.name_matches(business, adv_name):
-                    prospect_match = adv_name
+                    prospect_maybe = adv_name
                     break
 
         comp_hits = []
@@ -850,6 +857,7 @@ def build_ads_per_bucket(business, competitors, seo_per_bucket, prospect_website
         out[label] = {
             "prospect_running_ads": bool(prospect_match),
             "prospect_match": prospect_match,
+            "prospect_maybe_ad": prospect_maybe,
             "all_advertisers": names,
             "competitors_running_ads": comp_hits,
             # Derived from the SAME per-city SERP record, so it inherits that
@@ -939,7 +947,9 @@ def grade_ads_multi(ads_per_bucket):
     # could not scan is not one they are absent from, so it leaves the
     # denominator entirely. This grader never had that filter.
     buckets = [k for k in ads_per_bucket
-               if not (ads_per_bucket.get(k) or {}).get("error")]
+               if not (ads_per_bucket.get(k) or {}).get("error")
+               and not ((ads_per_bucket.get(k) or {}).get("prospect_maybe_ad")
+                        and not (ads_per_bucket.get(k) or {}).get("prospect_running_ads"))]
     total = len(buckets)
     found = sum(
         1 for b in buckets if (ads_per_bucket.get(b) or {}).get("prospect_running_ads")
@@ -1186,9 +1196,9 @@ def run_health_check(business, cities, state, listing=None):
         else:
             # HH-specific framing: many agencies don't run paid ads. Empty
             # bucket is an "open lane" rather than a failure narrative.
-            ads_lines.append(f"{b}: No ads detected (open lane)")
+            ads_lines.append(f"{b}: " + ads_words.none_seen(True))
     ads_lines.append(
-        f"{business}: {'Running' if business_running_anywhere else 'Not running'}"
+        f"{business}: {ads_words.summary(ads_per_bucket, list(ads_per_bucket))}"
     )
     ads_lines.append(f"Grade: {ads_grade}")
     print_section("GOOGLE ADS:", ads_lines)
