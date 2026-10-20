@@ -37,6 +37,7 @@ import argparse
 import json
 import os
 import re
+import threading
 import subprocess
 import sys
 import urllib.parse
@@ -71,6 +72,39 @@ def get_google_api_key():
         return ""
 
 
+
+# ---- "Couldn't check", never "No" from a page nobody read (Welton, 2026-10-20) ----------------------
+# A check used to answer No whenever a page it needed could not be read (blocked, rate-limited, server
+# error, no connection), and when a site refused the address probes. Now every fetch and probe made
+# while a check runs notes the pages it could not read, and measured() turns that check's No into None
+# ("Couldn't check"). A Yes stands (it was seen); a page that is not there (404/410) is still a No.
+_reads = threading.local()
+
+
+def _note_unread(url, why):
+    unread = getattr(_reads, "unread", None)
+    if unread is not None:
+        unread.append((url, why))
+
+
+def measured(check, *args):
+    """Run one check. Its No becomes None when a page it needed could not be read."""
+    _reads.unread = []
+    try:
+        result = check(*args)
+    finally:
+        unread, _reads.unread = _reads.unread, None
+    if not unread:
+        return result
+    if result is False or result is None:
+        return None
+    if isinstance(result, dict) and not result.get("pass"):
+        return dict(result, **{"pass": None})
+    if isinstance(result, tuple) and result and not result[0]:
+        return (None,) + tuple(result[1:])
+    return result
+
+
 def fetch_page(url, timeout=15):
     if not url:
         return None, None, "no url"
@@ -78,8 +112,11 @@ def fetch_page(url, timeout=15):
         url = "https://" + url
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
+        if r.status_code in (401, 403, 407, 429) or r.status_code >= 500:
+            _note_unread(url, "HTTP %s" % r.status_code)
         return r.text, r.status_code, r.url
     except Exception as e:
+        _note_unread(url, str(e)[:80])
         return None, None, str(e)
 
 
@@ -125,7 +162,10 @@ def find_internal_link_by_path(html, base_url, paths):
             r = requests.head(url, headers=HEADERS, timeout=8, allow_redirects=True)
             if r.status_code and 200 <= r.status_code < 300:
                 return r.url
-        except Exception:
+            if r.status_code not in (404, 410):
+                _note_unread(url, "HEAD %s" % r.status_code)   # the site would not say; not "no page"
+        except Exception as e:
+            _note_unread(url, str(e)[:80])
             continue
     return None
 
@@ -646,8 +686,8 @@ def grade_website(checks):
     """A=10/10, B=7-9, C=4-6, D=1-3, F=0. None values are excluded and the
     threshold is scaled proportionally."""
     real = [(k, v) for k, v in checks.items() if v is not None]
-    if not real:
-        return "F"
+    if not real or len(real) * 2 < len(checks):
+        return None   # too little measured to grade (most checks could not read their page)
     passed = sum(1 for _, v in real if v)
     total = len(real)
     scaled = round(passed * 10 / total)
@@ -695,10 +735,10 @@ def audit(url):
 
     with ThreadPoolExecutor(max_workers=6) as ex:
         psi_future = ex.submit(check_pagespeed, final_url, api_key)
-        team_future = ex.submit(check_about_team, html, base_url)
-        medicare_future = ex.submit(check_medicare_certified, html, base_url)
-        services_future = ex.submit(check_services_list, html, base_url)
-        referral_future = ex.submit(check_referral_page, html, base_url)
+        team_future = ex.submit(measured, check_about_team, html, base_url)
+        medicare_future = ex.submit(measured, check_medicare_certified, html, base_url)
+        services_future = ex.submit(measured, check_services_list, html, base_url)
+        referral_future = ex.submit(measured, check_referral_page, html, base_url)
 
         psi = psi_future.result()
         about_team_pass = team_future.result()

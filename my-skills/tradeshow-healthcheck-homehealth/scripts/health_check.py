@@ -1211,7 +1211,7 @@ def run_health_check(business, cities, state, listing=None):
                 return true_label
             if v is False:
                 return false_label
-            return "?"
+            return "Couldn't check"
 
         psi_score = web.get("pagespeed_score")
         if psi_score is None:
@@ -1224,12 +1224,12 @@ def run_health_check(business, cities, state, listing=None):
         services_display = (
             f"Yes ({', '.join(services_offered[:5])})"
             if c.get("services_list") and services_offered
-            else ("Yes" if c.get("services_list") else "No")
+            else ("Yes" if c.get("services_list") else ("Couldn't check" if c.get("services_list") is None else "No"))
         )
         star_rating = web.get("cms_star_rating")
         star_display = (
             f"Yes ({star_rating})" if c.get("cms_star_rating") and star_rating
-            else ("Yes" if c.get("cms_star_rating") else "No")
+            else ("Yes" if c.get("cms_star_rating") else ("Couldn't check" if c.get("cms_star_rating") is None else "No"))
         )
 
         web_lines = [
@@ -1244,10 +1244,10 @@ def run_health_check(business, cities, state, listing=None):
             f"Referral source page:      {yn(c.get('referral_page'), 'Yes', 'No')}",
             f"CMS Star Rating displayed: {star_display}",
             f"Platform:                  {platform}",
-            f"Grade: {web.get('grade', 'F')}",
+            f"Grade: {web.get('grade') or 'none (too little could be read)'}",
         ]
         print_section("WEBSITE:", web_lines)
-        web_grade = web.get("grade", "F")
+        web_grade = web.get("grade")
     results["website_grade"] = web_grade
 
     # Print Reviews snapshot

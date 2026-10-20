@@ -449,6 +449,13 @@ def _build_recommendations_top2(results):
     ]
 
 
+def _web_answer(value, no_text):
+    """Yes / the No text / "Couldn't check" (None: the page the check needed could not be read)."""
+    if value is None:
+        return "Couldn't check"
+    return "Yes" if value else no_text
+
+
 def build_pdf(results):
     business = results.get("business", "Prospect")
     city = results.get("city", "")
@@ -700,33 +707,33 @@ def build_pdf(results):
         services_offered = (web.get("services_offered") or [])[:5]
         star_value = web.get("cms_star_rating")
         bits = []
-        bits.append("Real photos: " + ("Yes" if wc.get("real_photos") else "No (stock)"))
+        bits.append("Real photos: " + _web_answer(wc.get("real_photos"), "No (stock)"))
         if psi_score is not None:
             bits.append(f"PageSpeed: {psi_score}/100")
         else:
-            bits.append("PageSpeed: ?")
-        bits.append("Team page: " + ("Yes" if wc.get("about_team_page") else "No"))
-        bits.append("Intake form: " + ("Yes" if wc.get("intake_form") else "No"))
-        bits.append("Schema: " + ("Yes" if wc.get("localbusiness_schema") else "No"))
-        bits.append("Reviews widget: " + ("Yes" if wc.get("google_reviews_widget") else "No"))
-        bits.append("Medicare-certified: " + ("Yes" if wc.get("medicare_certified") else "No"))
+            bits.append("PageSpeed: Couldn't check")
+        bits.append("Team page: " + _web_answer(wc.get("about_team_page"), "No"))
+        bits.append("Intake form: " + _web_answer(wc.get("intake_form"), "No"))
+        bits.append("Schema: " + _web_answer(wc.get("localbusiness_schema"), "No"))
+        bits.append("Reviews widget: " + _web_answer(wc.get("google_reviews_widget"), "No"))
+        bits.append("Medicare-certified: " + _web_answer(wc.get("medicare_certified"), "No"))
         if wc.get("services_list"):
             svc_label = "Yes"
             if services_offered:
                 svc_label = f"Yes ({', '.join(services_offered)})"
             bits.append("Services list: " + svc_label)
         else:
-            bits.append("Services list: No")
-        bits.append("Referral page: " + ("Yes" if wc.get("referral_page") else "No"))
+            bits.append("Services list: " + _web_answer(wc.get("services_list"), "No"))
+        bits.append("Referral page: " + _web_answer(wc.get("referral_page"), "No"))
         if wc.get("cms_star_rating"):
             star_label = f"Yes ({star_value})" if star_value else "Yes"
             bits.append(f"CMS Star Rating: {star_label}")
         else:
-            bits.append("CMS Star Rating: No")
+            bits.append("CMS Star Rating: " + _web_answer(wc.get("cms_star_rating"), "No"))
         web_detail = "  |  ".join(bits)
         if platform and platform != "Unknown":
             web_detail += f"<br/><b>Platform:</b> {platform}"
-        web_grade_display = grades.get("website") or "F"
+        web_grade_display = grades.get("website") or "N/A"
 
     # Ads per bucket - HH framing for empty buckets
     ads_lines = []

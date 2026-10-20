@@ -550,7 +550,7 @@ if st.session_state.get("scan_done"):
                     ("cms_star_rating", "CMS Star Rating displayed"),
                 ]:
                     v = checks.get(k)
-                    mark = "✅" if v is True else ("❌" if v is False else "—")
+                    mark = "✅" if v is True else ("❌" if v is False else "Couldn't check")
                     st.write(f"- {label}: {mark}")
                 services = web.get("services_offered") or []
                 if services:
