@@ -11,10 +11,11 @@ Medicare visits, discharge planners).
 
 import datetime
 import io
-import json as _json
 import os
-import urllib.request
+
 from pathlib import Path
+
+import headline
 
 import qrcode
 
@@ -232,104 +233,7 @@ def _normalize_place(s):
     return s.lower().replace(".", "").replace("saint ", "st ").replace("ft ", "fort ").strip()
 
 
-def get_city_population(city, state_abbr):
-    """Look up city population from US Census."""
-    cache_key = (city.lower().strip(), state_abbr.upper())
-    if cache_key in _census_cache:
-        return _census_cache[cache_key]
-
-    fips = STATE_FIPS.get(state_abbr.upper())
-    if not fips:
-        return None
-    url = (
-        f"https://api.census.gov/data/2020/dec/pl"
-        f"?get=P1_001N,NAME&for=place:*&in=state:{fips}"
-    )
-    try:
-        req = urllib.request.Request(url)
-        resp = urllib.request.urlopen(req, timeout=10)
-        data = _json.loads(resp.read())
-        city_norm = _normalize_place(city)
-        matches = []
-        for row in data[1:]:
-            place_name = row[1].split(",")[0].strip()
-            bare = _normalize_place(place_name)
-            for suffix in (" city", " town", " village", " cdp", " borough", " municipality"):
-                if bare.endswith(suffix):
-                    bare = bare[: -len(suffix)].strip()
-                    break
-            if bare == city_norm:
-                matches.append(int(row[0]))
-        result = max(matches) if matches else None
-        _census_cache[cache_key] = result
-        return result
-    except Exception:
-        return None
-
-
-def _pop_multiplier(population):
-    if population is None or population < 100_000:
-        return 1.0
-    if population < 300_000:
-        return 1.5
-    if population < 750_000:
-        return 2.5
-    return 4.0
-
-
 # ----------------------------- impact estimators -----------------------------
-
-
-def estimate_lost_intakes(results):
-    """Heuristic estimate of intake calls / referrals per month going to
-    competitors, scaled by city population.
-
-    Home health volume is referral-source driven plus family-driven; a
-    typical mid-size agency sees 20-50 intake calls per month split
-    between hospital discharge planners and family self-referrals.
-    """
-    cities = results.get("cities") or []
-    state = results.get("state") or ""
-    pack_results = (results.get("3pack") or {}).get("results") or {}
-    ads_per_bucket = results.get("ads") or {}
-    bucket_labels = results.get("buckets") or list(pack_results.keys())
-
-    low = 0.0
-    high = 0.0
-    for label in bucket_labels:
-        if " / " in label:
-            geo_city = label.split(" / ", 1)[1]
-        else:
-            geo_city = cities[0] if cities else ""
-        pop = get_city_population(geo_city, state)
-        mult = _pop_multiplier(pop)
-        pack_c = pack_results.get(label) or {}
-        # An unscanned bucket contributes NOTHING. Charging it as a missed
-        # 3-Pack would put an invented number on a branded PDF handed to a
-        # prospect. Its ads data came from the same failed fetch, so the whole
-        # bucket is skipped.
-        if pack_c.get("error"):
-            continue
-        # An empty pack is not a missed 3-Pack: grade_3pack_multi leaves it out,
-        # and so does this estimate (Welton, 2026-10-20).
-        if not pack_c.get("in_3_pack") and [t for t in (pack_c.get("top_3") or []) if t]:
-            low += 4 * mult
-            high += 8 * mult
-        d = ads_per_bucket.get(label) or {}
-        comps = d.get("competitors_running_ads") or []
-        if comps and not d.get("prospect_running_ads"):
-            low += 2 * mult
-            high += 5 * mult
-
-    target = (results.get("google_intel") or {}).get("target") or {}
-    target_reviews = target.get("review_count") or 0
-    top = results.get("top_competitor") or {}
-    comp_reviews = top.get("review_count") or 0
-    if comp_reviews >= max(30, target_reviews * 2):
-        low *= 1.2
-        high *= 1.2
-
-    return int(round(low)), int(round(high))
 
 
 # Map-pack rows carry THREE states, not two, and the difference decides
@@ -365,101 +269,6 @@ def pack_status(pack_row):
         # than a fact about the market. Either way it is not a gap.
         return NO_PACK
     return ABSENT_FROM_PACK
-
-
-def build_adaptive_hook(results, overall, low, high):
-    """Pick the right hook copy based on the overall grade.
-
-    D/F: aggressive lost-intakes statement.
-    B/C: 'winning in some buckets but missing others' framing.
-    A:   no hook.
-    """
-    pack_results = (results.get("3pack") or {}).get("results") or {}
-    seo = results.get("seo") or {}
-    bucket_labels = results.get("buckets") or list(pack_results.keys())
-
-    if overall in ("D", "F"):
-        if high <= 0:
-            return None
-        return (
-            f"{low}-{high} families and discharge planners searching for home "
-            f"health in your service area last month found your competitors "
-            f"instead of you."
-        )
-
-    if overall in ("B", "C"):
-        winning = []
-        losing = []
-        for label in bucket_labels:
-            pack_c = pack_results.get(label) or {}
-            seo_c = seo.get(label) or {}
-            # PER AXIS. The old guard skipped only when BOTH axes errored, so a
-            # row with an unscanned SEO and no map pack landed in `losing` on
-            # zero measurement and was named in the headline as somewhere
-            # competitors are found instead of the prospect.
-            status = pack_status(pack_c)
-            seo_measured = not seo_c.get("error")
-            seo_rank = seo_c.get("rank")
-            in_seo = seo_measured and seo_rank is not None and seo_rank <= 10
-            seo_gap = seo_measured and not in_seo
-            if status == IN_PACK or in_seo:
-                winning.append(label)
-            elif status == ABSENT_FROM_PACK or seo_gap:
-                losing.append(label)
-            # Otherwise nothing was measurable on either axis: neither column.
-
-        if winning and losing:
-            win_lab = winning[0]
-            if len(losing) == 1:
-                lose_str = losing[0]
-            elif len(losing) == 2:
-                lose_str = f"{losing[0]} and {losing[1]}"
-            else:
-                lose_str = ", ".join(losing[:-1]) + f", and {losing[-1]}"
-            return (
-                f"You're winning in {win_lab}. But families and discharge "
-                f"planners searching {lose_str} are finding your competitors "
-                f"because they can't find you there."
-            )
-        if high > 0:
-            return (
-                f"{low}-{high} intakes slipped through to your competitors "
-                f"last month. The gaps are fixable."
-            )
-        return None
-
-    return None
-
-
-def count_competing_agencies(results):
-    """Count unique home health agencies that appeared anywhere in the scan."""
-    seen = set()
-    pack_results = (results.get("3pack") or {}).get("results") or {}
-    ads_per_bucket = results.get("ads") or {}
-    bucket_labels = results.get("buckets") or list(pack_results.keys())
-
-    def norm(name):
-        if not name:
-            return ""
-        return " ".join(name.lower().strip().split())
-
-    for label in bucket_labels:
-        for name in (pack_results.get(label) or {}).get("top_3", []) or []:
-            key = norm(name)
-            if key:
-                seen.add(key)
-        for name in (ads_per_bucket.get(label) or {}).get("all_advertisers", []) or []:
-            key = norm(name)
-            if key:
-                seen.add(key)
-
-    intel_comps = (results.get("google_intel") or {}).get("competitors") or []
-    for c in intel_comps:
-        key = norm(c.get("name") or "")
-        if key:
-            seen.add(key)
-
-    return len(seen)
 
 
 def build_recommendations(results):
@@ -714,8 +523,9 @@ def build_pdf(results):
         h_meta,
     ))
 
-    low, high = estimate_lost_intakes(results)
-    hook_text = build_adaptive_hook(results, overall, low, high)
+    # THE HOOK: only what the scan measured (scripts/headline.py; Welton
+    # 2026-10-20 dropped the lost-calls estimate, which was not measured).
+    hook_text = headline.measured_headline(results, 'Families and discharge planners')
     hook_style = ParagraphStyle(
         "hook", parent=styles["Normal"],
         fontName="Helvetica-Bold", fontSize=15, textColor=SCMM_RED,
@@ -724,19 +534,9 @@ def build_pdf(results):
     if hook_text:
         story.append(Paragraph(hook_text, hook_style))
 
-    competitor_count = count_competing_agencies(results)
-    snapshot_style = ParagraphStyle(
-        "snapshot", parent=styles["Normal"],
-        fontName="Helvetica", fontSize=11, textColor=SCMM_DARK,
-        leading=14, spaceAfter=10, alignment=1,
-    )
-    if competitor_count > 0:
-        story.append(Paragraph(
-            f"There are <b>{competitor_count}</b> home health agencies "
-            f"competing for those families and referrals in your service "
-            f"area right now.",
-            snapshot_style,
-        ))
+    # No "There are N ... competing" line (Welton 2026-10-20): the count merged map,
+    # ads and Google lists, counted one business spelled two ways twice, and
+    # nothing on the sheet showed where it came from (10 on La Paloma's NY run, 11 on NV).
 
     overall_color = GRADE_COLORS.get(overall, SCMM_GRAY)
     banner_label_style = ParagraphStyle(
