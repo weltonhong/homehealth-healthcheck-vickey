@@ -1090,7 +1090,7 @@ def run_health_check(business, cities, state):
         d = pack_results.get(label) or {}
         lab = f"{label}:"
         if not d or "error" in d:
-            return f"{lab:<{label_width}} ERROR ({d.get('error', '?')})"
+            return f"{lab:<{label_width}} Couldn't check this search"
         top_3_list = d.get("top_3", []) or []
         if not top_3_list:
             if d.get("confirmed_empty"):
@@ -1133,7 +1133,7 @@ def run_health_check(business, cities, state):
             # here tells a prospect they rank nowhere when nothing was measured,
             # the fabricated finding the 3-Pack row above already refuses.
             seo_lines.append(
-                f"{b}: ERROR ({str(d.get('error'))[:60]})")
+                f"{b}: Couldn't check this search")
             # The row is decided. Without this the loop falls through and
             # appends a second, contradictory line for the same city.
             continue
@@ -1166,7 +1166,7 @@ def run_health_check(business, cities, state):
             # Same reasoning as the SEO row: nothing scanned has no ad block
             # to be empty.
             ads_lines.append(
-                f"{b}: ERROR ({str(d.get('error'))[:60]})")
+                f"{b}: Couldn't check this search")
         elif advs:
             ads_lines.append(f"{b}: {', '.join(advs)}")
         else:
