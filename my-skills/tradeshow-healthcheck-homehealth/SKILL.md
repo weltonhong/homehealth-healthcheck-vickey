@@ -1,8 +1,14 @@
 ---
 name: tradeshow-healthcheck-homehealth
-description: "Trade show / cold-outreach booth tool for MEDICARE-CERTIFIED HOME HEALTH agencies (skilled nursing, PT/OT/ST, wound care, post-discharge, intermittent skilled care). Distinct from non-medical home care and from hospice. Runs a fast (60-90 second) online presence audit on a home health prospect across 2-3 cities they serve and prints a live scorecard, then generates a branded one-page Senior Care Marketing Max PDF. Scans Google reviews, 3-Pack (home health + home health agency), SEO organic, website (Medicare cert + services list + referral page + CMS Star Rating), and competitor ads in parallel. CTA routes to Vickey Lopez. Use when 'tradeshow healthcheck homehealth', 'health check home health', 'home health booth audit', 'home health trade show audit', 'health check [home health agency] [city] [state]'."
+description: "Trade show / cold-outreach booth tool for MEDICARE-CERTIFIED HOME HEALTH agencies (skilled nursing, PT/OT/ST, wound care, post-discharge, intermittent skilled care). Distinct from non-medical home care and from hospice. Runs a fast (60-90 second) online presence audit on a home health prospect across 2-3 cities they serve and prints a live scorecard, then generates a branded one-page Senior Care Marketing Max PDF. Scans Google reviews, 3-Pack (home health + home health agency), SEO organic, website (Medicare cert + services list + referral page + CMS Star Rating) in parallel. CTA routes to Vickey Lopez. Use when 'tradeshow healthcheck homehealth', 'health check home health', 'home health booth audit', 'home health trade show audit', 'health check [home health agency] [city] [state]'."
 allowed-tools: Bash, Read, Write, AskUserQuestion
 ---
+
+> **RETIRED 2026-10-22 (Welton): ads are off the booth sheet, the screen and the live log.** 50 of 53 recorded
+> answers from the search source carried no ads while Chrome showed them, so "No ads seen" meant we were blind, not
+> that the market was empty. Every Ads row, Ads grade, "open lane" line and COMPETITOR ADS / GOOGLE ADS sample
+> below describes the retired behaviour. The organic Top 3 is Google's actual top three named by Google listings, or
+> nothing; the most-reviewed rival is a listing within 25 miles that is not theirs by place id, phone or street.
 
 # TRADESHOW HEALTH CHECK - HOME HEALTH
 

@@ -541,7 +541,7 @@ def ddg_html_search(query):
     return results
 
 
-def check_seo_per_bucket(business, website, buckets, own_cids=(), state=""):
+def check_seo_per_bucket(business, website, buckets, own_cids=(), state="", listings=()):
     """For each bucket, run the SERP rank script with that bucket's query."""
     biz_domain = ""
     if website:
@@ -617,7 +617,7 @@ def check_seo_per_bucket(business, website, buckets, own_cids=(), state=""):
         # sheet). The old directory filter stays as an extra skip only.
         top_3 = organic_names.top_names(
             raw_results, website, business,
-            skip=lambda r: not is_real_homehealth_result(r), town=geo_city)
+            skip=lambda r: not is_real_homehealth_result(r), town=geo_city, listings=listings)
         sys.stdout.flush()
 
         raw_ads = match.get("ads") or []
@@ -1098,13 +1098,13 @@ def run_health_check(business, cities, state, listing=None):
     # Plain language on purpose: a prospect reads this over the rep's
     # shoulder, and "SEO+3-Pack" means nothing to them.
     print(
-        f"Checking {_join_human(cities)}. Map results, search results, ads, website and reviews.\n"
+        f"Checking {_join_human(cities)}. Map results, search results, website and reviews.\n"
     )
     sys.stdout.flush()
 
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {
-            ex.submit(check_seo_per_bucket, business, website, buckets, own_cids, state): "seo",
+            ex.submit(check_seo_per_bucket, business, website, buckets, own_cids, state, intel.get("nearby_listings") or []): "seo",
             ex.submit(check_website, website): "website",
             ex.submit(check_reviews_snapshot, business, home_city, state, intel): "reviews",
         }
@@ -1194,34 +1194,11 @@ def run_health_check(business, cities, state, listing=None):
     print_section("GOOGLE ORGANIC RANKINGS (SEO):", seo_lines)
     results["seo_grade"] = seo_grade
 
-    # Build and print Google Ads per bucket (BEFORE Website)
-    ads_per_bucket = build_ads_per_bucket(
-        business, competitors, seo, prospect_website=website
-    )
-    results["ads"] = ads_per_bucket
-    ads_grade = grade_ads_multi(ads_per_bucket)
-    ads_lines = []
-    business_running_anywhere = False
-    for b in bucket_labels:
-        d = ads_per_bucket.get(b) or {}
-        if d.get("prospect_running_ads"):
-            business_running_anywhere = True
-        advs = d.get("all_advertisers") or []
-        if d.get("error"):
-            # Same reasoning as the SEO row: nothing scanned has no ad block
-            # to be empty.
-            ads_lines.append(
-                f"{b}: Couldn't check this search")
-        else:
-            # HH-specific framing: many agencies don't run paid ads. Empty
-            # bucket is an "open lane" rather than a failure narrative.
-            ads_lines.append(f"{b}: " + ads_words.row_text(advs, d.get("ads_unnamed") or 0, True))
-    ads_lines.append(
-        f"{business}: {ads_words.summary(ads_per_bucket, list(ads_per_bucket))}"
-    )
-    ads_lines.append(f"Grade: {measured.grade_text(ads_grade)}")
-    print_section("GOOGLE ADS:", ads_lines)
-    results["ads_grade"] = ads_grade
+    # Ads are off the booth sheet (Welton 2026-10-22): 50 of 53 recorded answers from our search source carried no
+    # ads while Chrome showed them, so "No ads seen" meant we were blind, not that the market was empty. No row, no
+    # summary, no live-log section, no "open lane", and no "couldn't check" in their place, until a source sees ads.
+    ads_grade = None
+    results["ads_grade"] = None
 
     # Print Website
     web = results.get("website", {})
@@ -1285,9 +1262,10 @@ def run_health_check(business, cities, state, listing=None):
         (f"Google:   {rev.get('google', {}).get('count', '-')} reviews, "
          f"{rev.get('google', {}).get('rating', '-')} stars")
          if known else "Google:   " + listing_confirm.reason(target),
-        "Facebook: " + _snapshot_line(rev.get("facebook"), "Page found", "Not found"),
+        "Facebook: " + _snapshot_line(rev.get("facebook"), "Page found", "No page turned up in our search"),
         "Yelp:     " + _snapshot_line(
-            rev.get("yelp"), "%s reviews (page found)" % ((rev.get("yelp") or {}).get("count") or "?"), "Not found"),
+            rev.get("yelp"), ("%s reviews (page found)" % rev["yelp"]["count"]) if (rev.get("yelp") or {}).get("count")
+            else "Page found (review count not read)", "No page turned up in our search"),
     ]
     print_section("REVIEWS SNAPSHOT:", rev_lines)
 

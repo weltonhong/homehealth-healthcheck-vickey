@@ -337,38 +337,7 @@ def _build_recommendations_top2(results):
             f""
         ))
 
-    # ----- Ads: HH-vertical framing -------------------------------------
-    chose_ads_candidate = False
-    for label in measured.read(bucket_labels, ads_per_bucket):
-        d = ads_per_bucket.get(label) or {}
-        if d.get("prospect_running_ads") or d.get("prospect_maybe_ad") or d.get("theirs_unknown"):
-            continue
-        comps = d.get("competitors_running_ads") or []
-        all_ads = d.get("all_advertisers") or []
-        if comps or len(all_ads) >= 2:
-            display_names = [c["name"] for c in comps[:3]] if comps else all_ads[:3]
-            names = ", ".join(display_names)
-            score = 75 + len(all_ads) * 3
-            candidates.append((score,
-                f"<b>{names}</b> are paying Google to show their ad when families search \"{label}\". Your ad was not there when we searched."
-            ))
-            chose_ads_candidate = True
-            break
-
-    if not chose_ads_candidate:
-        empty_buckets = [
-            b for b in measured.read(bucket_labels, ads_per_bucket)
-            if not (ads_per_bucket.get(b) or {}).get("all_advertisers")
-            and not (ads_per_bucket.get(b) or {}).get("ads_unnamed")
-        ]
-        if empty_buckets:
-            target_bucket = empty_buckets[0]
-            score = 65
-            candidates.append((score,
-                f"No ads came up when we searched \"{target_bucket}\". "
-                f"That search is an open lane."
-            ))
-
+    # Ads are off the sheet (Welton 2026-10-22): no ads bullet and no "open lane".
     # ----- SEO Organic --------------------------------------------------
     not_ranking = [
         b for b in measured.read(bucket_labels, seo, organic=True)
@@ -733,26 +702,6 @@ def build_pdf(results):
             web_detail += f"<br/><b>Platform:</b> {platform}"
         web_grade_display = grades.get("website") or "N/A"
 
-    # Ads per bucket - HH framing for empty buckets
-    ads_lines = []
-    business_running_anywhere = False
-    for label in bucket_labels:
-        d = ads.get(label) or {}
-        if d.get("prospect_running_ads"):
-            business_running_anywhere = True
-        advs = (d.get("all_advertisers") or [])[:3]
-        if d.get("error"):
-            # The prospect is handed this PDF. A failed fetch must not appear
-            # on it as a finding about their advertising.
-            ads_lines.append(
-                f"<b>{label}:</b> Couldn't check this search")
-        else:
-            ads_lines.append(f"<b>{label}:</b> " + ads_words.row_text(advs, d.get("ads_unnamed") or 0, True))
-    ads_lines.append(
-        f"<b>{business}:</b> "
-        + ads_words.summary(ads, list(ads))
-    )
-    ads_detail = "<br/>".join(ads_lines) or "No data"
 
     cell_style = ParagraphStyle(
         "cell", parent=styles["Normal"],
@@ -776,7 +725,6 @@ def build_pdf(results):
         [area("Google Reviews"), grades.get("reviews") or "N/A", cell(reviews_detail)],
         [area("Google Local Map Rankings"), measured.grade_text(grades.get("3pack")), cell(pack_detail)],
         [area("Google Organic Rankings (SEO)"), measured.grade_text(grades.get("seo")), cell(seo_detail)],
-        [area("Google Ads"), measured.grade_text(grades.get("ads")), cell(ads_detail)],
         [area("Website"), web_grade_display, cell(web_detail)],
     ]
 
