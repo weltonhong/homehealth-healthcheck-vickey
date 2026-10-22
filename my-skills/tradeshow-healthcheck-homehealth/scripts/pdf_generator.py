@@ -324,22 +324,11 @@ def _build_recommendations_top2(results):
     # pack existed; because the consumer below took [0] and gave up if
     # it had no top_3, a single packless home city SUPPRESSED the whole
     # bullet -- and with it two genuine, nameable gaps in other cities.
-    missing_packs = [
-        b for b in bucket_labels
-        if pack_status(pack_results.get(b)) == ABSENT_FROM_PACK
-    ]
-    if missing_packs:
-        target_bucket = missing_packs[0]
-        d = pack_results.get(target_bucket) or {}
-        top_3 = [t for t in (d.get("top_3") or []) if t][:3]
-        if top_3:
-            comps = ", ".join(top_3)
-            score = 100 + len(missing_packs) * 8
-            candidates.append((score,
-                f"<b>{comps}</b> own the Google Map Pack for \"{_typed(target_bucket, seo, results)}\". "
-                f"When a family or discharge planner searches that, those "
-                f"agencies get the intake call. Your name is not in the top 3 on the map."
-            ))
+    # Both points named; who Google shows, never what a family then does (Welton 2026-10-22).
+    mb = measured.map_bullet([(k, pack_results.get(k), (pack_results.get(k) or {}).get("door"),
+                               _typed(k, seo, results)) for k in bucket_labels], 'Families and discharge planners')
+    if mb:
+        candidates.append(mb)
 
     # ----- Reviews: name the competitor and the gap ---------------------
     rc = target.get("review_count") or 0
@@ -356,16 +345,12 @@ def _build_recommendations_top2(results):
 
     # Ads are off the sheet (Welton 2026-10-22): no ads bullet and no "open lane".
     # ----- SEO Organic --------------------------------------------------
-    not_ranking = [
-        b for b in measured.read(bucket_labels, seo, organic=True)
-        if (seo.get(b) or {}).get("rank") is None
-        or ((seo.get(b) or {}).get("rank") or 99) > 10
-    ]
+    not_ranking, points = measured.organic_gaps(bucket_labels, seo)
     if not_ranking:
         labels_str = _quoted([_typed(b, seo, results) for b in not_ranking])
         score = 50 + len(not_ranking) * 5
         candidates.append((score,
-            f"When we searched {labels_str} {measured.searched_when(results)}, your agency was not "
+            f"When we searched {labels_str} {measured.searched_when(results)}, {points}, your agency was not "
             f"on the first page of the regular results."
         ))
 
@@ -639,9 +624,10 @@ def build_pdf(results):
         return f"NOT FOUND (Top 3: {top_3_str})"
 
     pack_lines_html = [
-        f"<b>{label}:</b> {pack_cell(pack_results.get(label))}"
+        f"<b>{label}:</b> " + escape(measured.map_line(pack_results.get(label), (pack_results.get(label) or {}).get("door"), measured.town_of(label)))
         for label in bucket_labels
     ]
+    pack_lines_html += [n for n in [measured.office_note([(pack_results.get(k) or {}).get("door") for k in bucket_labels])] if n]
     pack_detail = "<br/>".join(pack_lines_html) or "No data"
 
     import re as _re
@@ -663,13 +649,14 @@ def build_pdf(results):
             # The prospect is handed this PDF. A failed fetch must not appear
             # on it as a finding about their rankings.
             seo_lines_html.append(
-                f"<b>{label}:</b> " + measured.organic_text(d))
+                f"<b>{label}:</b> " + escape(measured.organic_line(d, d.get("door"), measured.town_of(label))))
             continue
         top_3_str = ", ".join(cleaned)
         # No names to list is not "no organic results" (Welton 2026-10-20): the page was read and the
         # rank stands; scripts/organic_names.py only names real businesses, so the list can be empty.
         top_3_part = f" (Top 3: {top_3_str})" if cleaned else ""
-        seo_lines_html.append(f"<b>{label}:</b> " + escape(measured.organic_row_text(d)))
+        seo_lines_html.append(f"<b>{label}:</b> " + escape(measured.organic_line(d, d.get("door"), measured.town_of(label))))
+    seo_lines_html += [n for n in [measured.office_note([(seo.get(k) or {}).get("door") for k in bucket_labels])] if n]
     seo_detail = "<br/>".join(seo_lines_html) if seo_lines_html else "No data"
 
     if web.get("unverified"):
@@ -714,7 +701,7 @@ def build_pdf(results):
 
     cell_style = ParagraphStyle(
         "cell", parent=styles["Normal"],
-        fontName="Helvetica", fontSize=11, leading=13,
+        fontName="Helvetica", fontSize=10, leading=12,
         textColor=colors.black,
     )
     area_style = ParagraphStyle(
@@ -774,8 +761,8 @@ def build_pdf(results):
         ("LINEAFTER", (0, 0), (-2, -1), 0.5, colors.lightgrey),
         ("LEFTPADDING", (0, 0), (-1, -1), 7),
         ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-        ("TOPPADDING", (0, 0), (-1, -1), 7),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]
     for i, row in enumerate(rows[1:], start=1):
         g = row[1]

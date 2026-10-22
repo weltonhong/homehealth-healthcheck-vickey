@@ -13,6 +13,13 @@ allowed-tools: Bash, Read, Write, AskUserQuestion
 > one" with "(ranked above you: ...)" naming only nearby Google listings whose own websites ranked above them; one
 > line under the table gives the time all searches ran. The overall grade rests on reviews, the map pack and the
 > website, never on organic rank.
+
+> **Two points (Welton 2026-10-22, evening):** every search runs twice, from the prospect's own Google listing address
+> ("your office") and from the town's center, and every map and organic line names both points ("#1 searched from your
+> office; not in the top 3 searched from the center of Springfield"). Organic says page one or not, never a number: this
+> retires the "#7" in the note above. With no confirmed listing there is no address to search from: each section says
+> "From your office: couldn't check (no confirmed address)" once. Bullets say who Google shows, never what a family then
+> does. The map grade counts both points. The example output further down predates this.
 > **Ads (Welton 2026-10-22, later):** one ungraded line from Google's Ads Transparency Center for their website's
 > domain (US, last 30 days; scripts/ads_records.py): "Google's ad records show no ads for their website in the last
 > 30 days." or "... show ads ..."; "Couldn't tell" for a website shared with other locations (franchises);
