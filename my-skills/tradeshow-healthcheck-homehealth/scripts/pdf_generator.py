@@ -18,6 +18,7 @@ from pathlib import Path
 import headline
 import listing_confirm
 import ads_words
+from xml.sax.saxutils import escape
 import measured
 
 import qrcode
@@ -348,10 +349,8 @@ def _build_recommendations_top2(results):
         labels_str = ", ".join(not_ranking)
         score = 50 + len(not_ranking) * 5
         candidates.append((score,
-            f"Families searching \"{labels_str}\" scroll the regular Google "
-            f"results and your agency is not on the first page. They are at "
-            f"the moment of need, usually a hospital discharge or a new "
-            f"diagnosis."
+            f"When we searched \"{labels_str}\" {measured.searched_when(results)}, your agency was not "
+            f"on the first page of the regular results."
         ))
 
     # ----- Website: HH-specific painful failures ------------------------
@@ -653,14 +652,7 @@ def build_pdf(results):
         # No names to list is not "no organic results" (Welton 2026-10-20): the page was read and the
         # rank stands; scripts/organic_names.py only names real businesses, so the list can be empty.
         top_3_part = f" (Top 3: {top_3_str})" if cleaned else ""
-        if rank is None:
-            seo_lines_html.append(
-                f"<b>{label}:</b> Not in top 10{top_3_part}"
-            )
-        else:
-            seo_lines_html.append(
-                f"<b>{label}:</b> Rank {rank}{top_3_part}"
-            )
+        seo_lines_html.append(f"<b>{label}:</b> " + escape(measured.organic_row_text(d)))
     seo_detail = "<br/>".join(seo_lines_html) if seo_lines_html else "No data"
 
     if web.get("unverified"):
@@ -755,6 +747,11 @@ def build_pdf(results):
         style.append(("TEXTCOLOR", (1, i), (1, i), GRADE_COLORS.get(g, SCMM_GRAY)))
     sc.setStyle(TableStyle(style))
     story.append(sc)
+    # When the searches ran, once under the table (Welton 2026-10-22).
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(escape(measured.searched_line(results)), ParagraphStyle(
+        "searched", parent=styles["Normal"], fontName="Helvetica-Oblique", fontSize=9, leading=11,
+        textColor=colors.black)))
     story.append(Spacer(1, 14))
 
     # Nothing measured to say: no section at all, never a sentence built on a failed search.

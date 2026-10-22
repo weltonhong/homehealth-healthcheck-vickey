@@ -7,8 +7,12 @@ allowed-tools: Bash, Read, Write, AskUserQuestion
 > **RETIRED 2026-10-22 (Welton): ads are off the booth sheet, the screen and the live log.** 50 of 53 recorded
 > answers from the search source carried no ads while Chrome showed them, so "No ads seen" meant we were blind, not
 > that the market was empty. Every Ads row, Ads grade, "open lane" line and COMPETITOR ADS / GOOGLE ADS sample
-> below describes the retired behaviour. The organic Top 3 is Google's actual top three named by Google listings, or
-> nothing; the most-reviewed rival is a listing within 25 miles that is not theirs by place id, phone or street.
+> below describes the retired behaviour. The most-reviewed rival is a listing within 25 miles that is not theirs by
+> place id, phone or street.
+> **Organic rank (Welton 2026-10-22, later):** one look at one moment, never graded. Rows read "#7" or "not on page
+> one" with "(ranked above you: ...)" naming only nearby Google listings whose own websites ranked above them; one
+> line under the table gives the time all searches ran. The overall grade rests on reviews, the map pack and the
+> website, never on organic rank.
 
 # TRADESHOW HEALTH CHECK - HOME HEALTH
 
