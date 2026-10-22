@@ -181,6 +181,9 @@ class CTAFooterCanvas(pdfcanvas.Canvas):
         ]
 
         all_lines = tagline + contact
+        if not getattr(CTAFooterCanvas, "gaps_measured", True):
+            # "Every week these gaps stay open" only beside a gap the sheet measured (Welton 2026-10-21).
+            all_lines = [(f, z, "") for f, z, _ in tagline[:2]] + all_lines[2:]
         text_center_x = (text_left + text_right) / 2
         for (font, size, text), y in zip(all_lines, positions):
             self.setFont(font, size)
@@ -318,8 +321,7 @@ def _build_recommendations_top2(results):
             candidates.append((score,
                 f"<b>{comps}</b> own the Google Map Pack for \"{target_bucket}\". "
                 f"When a family or discharge planner searches that, those "
-                f"agencies get the intake call. Your name is not in the top 3 on the map. Every search is a Medicare patient calling your "
-                f"competitor instead of you."
+                f"agencies get the intake call. Your name is not in the top 3 on the map."
             ))
 
     # ----- Reviews: name the competitor and the gap ---------------------
@@ -332,8 +334,7 @@ def _build_recommendations_top2(results):
             f"You have <b>{rc}</b> Google reviews. {comp_name} has <b>{comp_rc}</b>. "
             f"When a discharge planner is choosing where to send a patient, or "
             f"a family is choosing post-hospital care, they look at proof. "
-            f"Every review gap is a referral or an intake call going to your "
-            f"competitor."
+            f""
         ))
 
     # ----- Ads: HH-vertical framing -------------------------------------
@@ -349,9 +350,7 @@ def _build_recommendations_top2(results):
             names = ", ".join(display_names)
             score = 75 + len(all_ads) * 3
             candidates.append((score,
-                f"<b>{names}</b> are paying Google to show their ad when families search \"{label}\". Your ad was not there when we searched. Every click on a sponsored result "
-                f"is a Medicare-eligible family handing their intake call to "
-                f"your competitor before they ever see your name."
+                f"<b>{names}</b> are paying Google to show their ad when families search \"{label}\". Your ad was not there when we searched."
             ))
             chose_ads_candidate = True
             break
@@ -367,9 +366,7 @@ def _build_recommendations_top2(results):
             score = 65
             candidates.append((score,
                 f"No ads came up when we searched \"{target_bucket}\". "
-                f"That search is an open lane. The first agency to start advertising "
-                f"will capture the high-intent searches with no competition "
-                f"for the click, and the intake calls that come with them."
+                f"That search is an open lane."
             ))
 
     # ----- SEO Organic --------------------------------------------------
@@ -385,8 +382,7 @@ def _build_recommendations_top2(results):
             f"Families searching \"{labels_str}\" scroll the regular Google "
             f"results and your agency is not on the first page. They are at "
             f"the moment of need, usually a hospital discharge or a new "
-            f"diagnosis. Every researcher who never finds you is an episode "
-            f"of care going to whoever does show up."
+            f"diagnosis."
         ))
 
     # ----- Website: HH-specific painful failures ------------------------
@@ -396,8 +392,7 @@ def _build_recommendations_top2(results):
         score = 70
         candidates.append((score,
             f"Your homepage scores <b>{psi}/100</b> on mobile speed. Discharge "
-            f"planners and families researching home health on iPhones are left waiting on a page Google scores as slow, and a slow page loses them before it loads. Every bounce is an intake call "
-            f"you should have answered that you never will."
+            f"planners and families researching home health on iPhones are left waiting on a page Google scores as slow, and a slow page loses them before it loads."
         ))
     elif web_checks.get("medicare_certified") is False:
         score = 65
@@ -412,7 +407,7 @@ def _build_recommendations_top2(results):
         score = 60
         candidates.append((score,
             f"Your website has no dedicated page for hospitals, SNFs, "
-            f"physicians, or case managers to refer patients. Most home health patients come to an agency through a referral. Without a clear "
+            f"physicians, or case managers to refer patients. Without a clear "
             f"'Refer a Patient' workflow, discharge planners send their next "
             f"patient to the agency whose form is one click away."
         ))
@@ -610,7 +605,7 @@ def build_pdf(results):
 
     filtered_comps = [
         c for c in intel_comps
-        if c.get("name") and not _is_self(c.get("name", ""))
+        if c.get("name") and not measured.same_listing(c, (results.get("google_intel") or {}).get("target"), business)
     ]
     top_3_comps = sorted(
         filtered_comps,
@@ -716,7 +711,7 @@ def build_pdf(results):
         else:
             bits.append("PageSpeed: Couldn't check")
         bits.append("Team page: " + _web_answer(wc.get("about_team_page"), "No"))
-        bits.append("Intake form: " + _web_answer(wc.get("intake_form"), "No"))
+        bits.append("Intake form on homepage: " + _web_answer(wc.get("intake_form"), "No"))
         bits.append("Schema: " + _web_answer(wc.get("localbusiness_schema"), "No"))
         bits.append("Reviews widget: " + _web_answer(wc.get("google_reviews_widget"), "No"))
         bits.append("Medicare-certified: " + _web_answer(wc.get("medicare_certified"), "No"))
@@ -816,6 +811,7 @@ def build_pdf(results):
 
     # Nothing measured to say: no section at all, never a sentence built on a failed search.
     recs = build_recommendations(results)
+    CTAFooterCanvas.gaps_measured = bool(recs)
     if recs:
         story.append(Paragraph("WHERE YOUR INTAKES ARE GOING", h_section))
     for rec in recs:
