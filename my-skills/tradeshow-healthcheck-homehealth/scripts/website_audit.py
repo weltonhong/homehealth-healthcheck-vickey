@@ -599,7 +599,7 @@ def check_referral_page(home_html, base_url):
     """Pass if there's a dedicated referral page reachable via homepage
     href OR direct path probe, OR if referral language is prominent
     across the homepage and any aux pages we crawl. Most HH revenue
-    comes from referral sources, not family self-referrals — missing
+    comes from referral sources, not family self-referrals; missing
     this is a real revenue gap."""
     aux_pages = fetch_aux_pages(home_html or "", base_url, REFERRAL_AUX_PATHS, timeout=10)
     if aux_pages:
@@ -636,9 +636,13 @@ STAR_MENTION_PATTERNS = [
 
 def check_cms_star_rating(html):
     """Returns (passed, value_or_None). Pass if the page mentions a CMS /
-    Care Compare star rating. Also captures the numeric value if shown."""
+    Care Compare star rating. Also captures the numeric value if shown.
+
+    What this measures is whether a star rating is SHOWN ON THE HOMEPAGE, nothing about the agency's
+    actual CMS rating (nothing here asks CMS), so the sheet says "Star rating on homepage" (Welton
+    2026-10-21). No homepage read: None, couldn't check, never a No."""
     if not html:
-        return False, None
+        return None, None
     text = re.sub(r"<[^>]+>", " ", html)
     text = re.sub(r"\s+", " ", text)
     text_l = text.lower()

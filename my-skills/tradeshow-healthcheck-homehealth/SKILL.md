@@ -19,7 +19,7 @@ This is a fork of `tradeshow-healthcheck-homecare`, retooled for home health voc
 
 These three verticals look adjacent but have completely different buyer journeys:
 
-- **Home health (this skill)**: Medicare-certified, skilled care delivered at home. RNs, LPNs, PT/OT/ST therapists, home health aides, medical social workers. Most volume comes from REFERRAL SOURCES (hospitals, SNFs, physicians, discharge planners), not family self-referrals — though families also call, especially after a hospital discharge or new diagnosis. Episodes of care, CMS Star Ratings, Care Compare.
+- **Home health (this skill)**: Medicare-certified, skilled care delivered at home. RNs, LPNs, PT/OT/ST therapists, home health aides, medical social workers. Most volume comes from REFERRAL SOURCES (hospitals, SNFs, physicians, discharge planners), not family self-referrals, though families also call, especially after a hospital discharge or new diagnosis. Episodes of care, CMS Star Ratings, Care Compare.
 - **Home care** (`tradeshow-healthcheck-homecare`): Non-medical, private-pay. Companion care, ADL help, transportation. Family-pay and family-driven. Billable hours.
 - **Hospice**: End-of-life care. Different regulatory framing again. Not covered by either skill.
 
@@ -49,7 +49,7 @@ Order:
 - Never batch multiple questions in one prompt. One question, wait, next question.
 - After each user answer, the next message is just the next blank question label - no acknowledgment text, no restating what they said.
 
-If the user answers "skip", "none", "n/a", or leaves a city blank, skip that city. 2-3 cities is the realistic norm — Medicare-defined service areas are typically larger than non-medical home care territories but smaller than cemeteries draw from.
+If the user answers "skip", "none", "n/a", or leaves a city blank, skip that city. 2-3 cities is the realistic norm. Medicare-defined service areas are typically larger than non-medical home care territories but smaller than cemeteries draw from.
 
 After collecting all inputs, run the script with the collected values.
 
@@ -84,7 +84,7 @@ The script:
 | Home health agency (secondary) | `home health agency [city] [state]` | Every city |
 | Medicare home health (tertiary) | `medicare home health [home_city] [state]` | Home city only |
 
-Home health is the family-and-discharge-planner search. "Home health agency" is the more deliberate, often-referral-source-driven search. "Medicare home health" is the highest-intent payer-savvy search and a strong signal of a family who's done their homework — we run it in the home city only to keep scan time under 90 seconds.
+Home health is the family-and-discharge-planner search. "Home health agency" is the more deliberate, often-referral-source-driven search. "Medicare home health" is the highest-intent payer-savvy search and a strong signal of a family who's done their homework; we run it in the home city only to keep scan time under 90 seconds.
 
 ## What It Scans
 
@@ -92,7 +92,7 @@ Home health is the family-and-discharge-planner search. "Home health agency" is 
 |-------|--------|--------|
 | Google Reviews | google_intel.py (Google Places API) | Target reviews + top competitor reviews + gap. Same relative grading scale as homecare (A if more than top competitor OR 100+). |
 | Google 3-Pack | Per-bucket Google SERP -> Local Map Pack | In/out of top 3 from each bucket. |
-| SEO Organic | ScrapingBee + UULE per bucket (Playwright fallback) | Rank for each bucket. Heavy directory filtering — Care Compare and aggregator sites dominate HH SERPs. |
+| SEO Organic | ScrapingBee + UULE per bucket (Playwright fallback) | Rank for each bucket. Heavy directory filtering: Care Compare and aggregator sites dominate HH SERPs. |
 | Website | requests.get + PageSpeed Insights API + subpage fetches | 10 hard checks: real photos, PageSpeed mobile, About/team page, intake form, LocalBusiness schema, Google reviews widget, Medicare-certified mention, services list, referral source page, CMS Star Rating displayed. Detects platform (HealthcareSuccess, Stratus, Hearst Health, BlueOrange Compass, plus generic WordPress/Squarespace/Wix). |
 | Reviews Snapshot | Google Places + DDG search | Google + Facebook + Yelp counts/links |
 | Competitor Ads | Same SERP HTML from SEO check; parses `div#tads` | Real Google ad advertisers per bucket. Domain-only matching filters out corporate operator ads (Amedisys, LHC Group, Encompass, BAYADA corporate, Interim). |
@@ -108,7 +108,7 @@ Home health is the family-and-discharge-planner search. "Home health agency" is 
 | Website | 10/10 checks pass (or N/A if blocked) | 7-9 | 4-6 | 1-3 | 0 |
 | Overall | Average of all grades except those marked "Unable to verify" |
 
-**No advertisers detected:** Many home health agencies don't run paid ads — referral-source driven. The scorecard frames empty buckets as "open lane" opportunity rather than failure (same as cemetery).
+**No advertisers detected:** Many home health agencies don't run paid ads (referral-source driven). The scorecard frames empty buckets as "open lane" opportunity rather than failure (same as cemetery).
 
 ## Unable to Verify (Website)
 

@@ -61,6 +61,7 @@ import map_identity  # noqa: E402  (which map card is the prospect)
 import organic_names  # noqa: E402  (real names in the organic Top 3)
 import listing_confirm  # noqa: E402  (the rep confirms the business's own listing)
 import ads_words  # noqa: E402  (what the sheet may say about their ads)
+import measured  # noqa: E402  (nothing may rest on a failed search or lookup)
 import name_matcher  # noqa: E402
 
 
@@ -503,6 +504,7 @@ def build_pack_from_seo(buckets, seo_per_bucket):
             "in_3_pack": bool(lp.get("in_3_pack")),
             "top_3": lp.get("top_3") or [],
             "maybe_rank": lp.get("maybe_rank"),
+            "no_id": lp.get("no_id"),
             # Carried so the renderers can tell a CONFIRMED absence of a map
             # pack from one nobody could confirm. Without it the two collapse
             # and print the same sentence.
@@ -519,7 +521,9 @@ def ddg_html_search(query):
         r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=15)
         html = r.text
     except Exception:
-        return []
+        return None      # couldn't check: never an empty answer
+    if r.status_code != 200 or ('result__a' not in html and 'No results' not in html):
+        return None      # not a results page (a block or a challenge page): couldn't check
     results = []
     pattern = re.compile(
         r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
@@ -537,7 +541,7 @@ def ddg_html_search(query):
     return results
 
 
-def check_seo_per_bucket(business, website, buckets, own_cids=()):
+def check_seo_per_bucket(business, website, buckets, own_cids=(), state=""):
     """For each bucket, run the SERP rank script with that bucket's query."""
     biz_domain = ""
     if website:
@@ -558,7 +562,9 @@ def check_seo_per_bucket(business, website, buckets, own_cids=()):
                     sys.executable, str(serp_script),
                     "--business", business,
                     "--domain", biz_domain,
-                    "--city", geo_city,
+                    # Town AND state, like home care and franchise (Welton 2026-10-21): a bare
+                    # town skips the out-of-state guard in geocode_city_osm.
+                    "--city", f"{geo_city} {state}".strip(),
                     "--queries", query,
                     "--cids", ",".join(own_cids),
                 ],
@@ -626,6 +632,8 @@ def check_seo_per_bucket(business, website, buckets, own_cids=()):
         return label, {
             "query": query,
             "rank": match.get("rank"),
+            # No website to compare: no result can be called theirs (scripts/measured.py).
+            "organic_error": match.get("organic_error"),
             "top_3": top_3,
             "ads": raw_ads,
             "local_pack": match.get("local_pack") or {
@@ -679,8 +687,18 @@ def check_website(website):
     if is_blocked or (result.get("error") and not result.get("checks")):
         result["grade"] = None
         result["unverified"] = True
-        result["unverified_reason"] = result.get("unverified_reason") or "Website blocked our scan"
+        refused = "403" in err or "429" in err or "blocked" in err or "captcha" in err
+        result["unverified_reason"] = result.get("unverified_reason") or (
+            "Website blocked our scan" if refused else "Couldn't check (the site did not load for us)")
     return result
+
+
+def _snapshot_line(site, found, not_found):
+    """Facebook / Yelp in the live log: found, not found, or couldn't check when the search failed."""
+    site = site or {}
+    if site.get("url"):
+        return found
+    return not_found if site.get("checked", True) else "Couldn't check"
 
 
 def check_reviews_snapshot(business, city, state, google_data):
@@ -695,13 +713,15 @@ def check_reviews_snapshot(business, city, state, google_data):
     }
 
     fb_results = ddg_html_search(f'"{business}" {city} {state} site:facebook.com')
-    for r in fb_results[:5]:
+    snapshot["facebook"]["checked"] = fb_results is not None
+    for r in (fb_results or [])[:5]:
         if "facebook.com" in r["url"] and "/pages" not in r["url"]:
             snapshot["facebook"]["url"] = r["url"]
             break
 
     yelp_results = ddg_html_search(f'"{business}" {city} {state} site:yelp.com')
-    for r in yelp_results[:5]:
+    snapshot["yelp"]["checked"] = yelp_results is not None
+    for r in (yelp_results or [])[:5]:
         if "yelp.com/biz" in r["url"]:
             snapshot["yelp"]["url"] = r["url"]
             m = re.search(r"(\d+)\s+reviews?", r["title"], re.IGNORECASE)
@@ -806,17 +826,9 @@ def build_ads_per_bucket(business, competitors, seo_per_bucket, prospect_website
     for label, data in seo_per_bucket.items():
         ads_list = data.get("ads") or []
 
-        names = []
-        seen = set()
-        for adv in ads_list:
-            name = (adv or {}).get("name", "")
-            if not name:
-                continue
-            key = name.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            names.append(name)
+        # An ad's headline is its copy, not its maker: an ad is named only by its link, and every
+        # other ad is counted and named by nobody (scripts/ads_words.py, Welton 2026-10-21).
+        names, unnamed, comp_names = ads_words.advertisers(ads_list, competitors, business, prospect_website)
 
         prospect_match = None
         # 1) Domain-only match
@@ -842,24 +854,17 @@ def build_ads_per_bucket(business, competitors, seo_per_bucket, prospect_website
                     prospect_maybe = adv_name
                     break
 
-        comp_hits = []
-        seen_matches = set()
-        for comp in (competitors or [])[:5]:
-            comp_name = (comp.get("name") or "").strip()
-            if not comp_name:
-                continue
-            for n in names:
-                if _strict_name_match(comp_name, n) and n.lower() not in seen_matches:
-                    comp_hits.append({"name": comp_name, "matched_as": n})
-                    seen_matches.add(n.lower())
-                    break
+        comp_hits = [{"name": n} for n in comp_names]
 
         out[label] = {
             "prospect_running_ads": bool(prospect_match),
             "prospect_match": prospect_match,
             "prospect_maybe_ad": prospect_maybe,
             "all_advertisers": names,
+            "ads_unnamed": unnamed,
             "competitors_running_ads": comp_hits,
+            # No website: their ad cannot be recognized by its link (scripts/measured.py).
+            "theirs_unknown": not prospect_domain,
             # Derived from the SAME per-city SERP record, so it inherits that
             # record's failure. Without this the ads row reads a failed fetch
             # as an empty ad block and prints "No ads detected" -- a finding
@@ -924,7 +929,8 @@ def grade_3pack_multi(pack):
     buckets = [b for b in buckets
                if not (results.get(b) or {}).get("error")
                and (results.get(b) or {}).get("top_3")
-               and not (results.get(b) or {}).get("maybe_rank")]
+               and not (results.get(b) or {}).get("maybe_rank")
+               and not (results.get(b) or {}).get("no_id")]
     total = len(buckets)
     found = sum(1 for b in buckets if (results.get(b) or {}).get("in_3_pack"))
     return grade_count_based(found, total)
@@ -932,7 +938,7 @@ def grade_3pack_multi(pack):
 
 def grade_seo_multi(seo_per_bucket):
     buckets = [b for b in seo_per_bucket
-               if not (seo_per_bucket.get(b) or {}).get("error")]
+               if not measured.organic_failed(seo_per_bucket.get(b))]
     total = len(buckets)
     found = 0
     for b in buckets:
@@ -948,6 +954,7 @@ def grade_ads_multi(ads_per_bucket):
     # denominator entirely. This grader never had that filter.
     buckets = [k for k in ads_per_bucket
                if not (ads_per_bucket.get(k) or {}).get("error")
+               and not (ads_per_bucket.get(k) or {}).get("theirs_unknown")
                and not ((ads_per_bucket.get(k) or {}).get("prospect_maybe_ad")
                         and not (ads_per_bucket.get(k) or {}).get("prospect_running_ads"))]
     total = len(buckets)
@@ -958,14 +965,8 @@ def grade_ads_multi(ads_per_bucket):
 
 
 def overall_grade(grades):
-    """Average of grades, ignoring None values."""
-    pts = {"A": 4, "B": 3, "C": 2, "D": 1, "F": 0}
-    inv = {4: "A", 3: "B", 2: "C", 1: "D", 0: "F"}
-    real = [g for g in grades if g in pts]
-    if not real:
-        return "F"
-    avg = round(sum(pts[g] for g in real) / len(real))
-    return inv.get(avg, "F")
+    """Average of the measured grades; None when nothing was measured, never an F (scripts/measured.py)."""
+    return measured.overall_grade(grades)
 
 
 # ----------------------------- printing -----------------------------
@@ -1061,7 +1062,7 @@ def run_health_check(business, cities, state, listing=None):
             print_section(
                 "TOP COMPETITOR:",
                 [
-                    f"{top_comp.get('name', '?')} -- "
+                    f"{top_comp.get('name', '?')}: "
                     f"{top_comp.get('review_count') or 0} reviews, "
                     f"{top_comp.get('rating') or '-'} stars"
                 ],
@@ -1085,7 +1086,7 @@ def run_health_check(business, cities, state, listing=None):
 
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {
-            ex.submit(check_seo_per_bucket, business, website, buckets, own_cids): "seo",
+            ex.submit(check_seo_per_bucket, business, website, buckets, own_cids, state): "seo",
             ex.submit(check_website, website): "website",
             ex.submit(check_reviews_snapshot, business, home_city, state, intel): "reviews",
         }
@@ -1128,11 +1129,13 @@ def run_health_check(business, cities, state, listing=None):
         if d.get("maybe_rank"):
             return (f"{lab:<{label_width}} Couldn't confirm: #{d['maybe_rank']} may be you "
                     f"(Top 3: {top_3_str})")
+        if d.get("no_id"):
+            return f"{lab:<{label_width}} Couldn't confirm which card is theirs (Top 3: {top_3_str})"
         return f"{lab:<{label_width}} NOT FOUND (Top 3: {top_3_str})"
 
     pack_grade = grade_3pack_multi(pack)
     pack_lines = [fmt_pack_line(b) for b in bucket_labels]
-    pack_lines.append(f"Grade: {pack_grade}")
+    pack_lines.append(f"Grade: {measured.grade_text(pack_grade)}")
     print_section("GOOGLE LOCAL MAP RANKINGS:", pack_lines)
     results["pack_grade"] = pack_grade
 
@@ -1152,7 +1155,7 @@ def run_health_check(business, cities, state, listing=None):
         rank = d.get("rank")
         top_3 = d.get("top_3") or []
         cleaned = [trim_title(t) for t in top_3[:3] if t]
-        if d.get("error"):
+        if measured.organic_failed(d):
             # A failed fetch is not an absence. Printing "no organic results"
             # here tells a prospect they rank nowhere when nothing was measured,
             # the fabricated finding the 3-Pack row above already refuses.
@@ -1169,7 +1172,7 @@ def run_health_check(business, cities, state, listing=None):
             seo_lines.append(f"{b}: Not in top 10{top_3_part}")
         else:
             seo_lines.append(f"{b}: Rank {rank}{top_3_part}")
-    seo_lines.append(f"Grade: {seo_grade}")
+    seo_lines.append(f"Grade: {measured.grade_text(seo_grade)}")
     print_section("GOOGLE ORGANIC RANKINGS (SEO):", seo_lines)
     results["seo_grade"] = seo_grade
 
@@ -1191,16 +1194,14 @@ def run_health_check(business, cities, state, listing=None):
             # to be empty.
             ads_lines.append(
                 f"{b}: Couldn't check this search")
-        elif advs:
-            ads_lines.append(f"{b}: {', '.join(advs)}")
         else:
             # HH-specific framing: many agencies don't run paid ads. Empty
             # bucket is an "open lane" rather than a failure narrative.
-            ads_lines.append(f"{b}: " + ads_words.none_seen(True))
+            ads_lines.append(f"{b}: " + ads_words.row_text(advs, d.get("ads_unnamed") or 0, True))
     ads_lines.append(
         f"{business}: {ads_words.summary(ads_per_bucket, list(ads_per_bucket))}"
     )
-    ads_lines.append(f"Grade: {ads_grade}")
+    ads_lines.append(f"Grade: {measured.grade_text(ads_grade)}")
     print_section("GOOGLE ADS:", ads_lines)
     results["ads_grade"] = ads_grade
 
@@ -1209,7 +1210,7 @@ def run_health_check(business, cities, state, listing=None):
     if web.get("unverified"):
         reason = web.get("unverified_reason") or web.get("error") or "blocked"
         print_section("WEBSITE:", [
-            reason if reason.startswith("Couldn't check") else f"Unable to verify -- {reason}",
+            reason if reason.startswith("Couldn't check") else f"Couldn't check: {reason}",
             "Grade: not counted in overall",
         ])
         web_grade = None
@@ -1252,7 +1253,7 @@ def run_health_check(business, cities, state, listing=None):
             f"Medicare-certified:        {yn(c.get('medicare_certified'), 'Yes', 'No (not stated)')}",
             f"Services list:             {services_display}",
             f"Referral source page:      {yn(c.get('referral_page'), 'Yes', 'No')}",
-            f"CMS Star Rating displayed: {star_display}",
+            f"Star rating on homepage:   {star_display}",
             f"Platform:                  {platform}",
             f"Grade: {web.get('grade') or 'none (too little could be read)'}",
         ]
@@ -1266,9 +1267,9 @@ def run_health_check(business, cities, state, listing=None):
         (f"Google:   {rev.get('google', {}).get('count', '-')} reviews, "
          f"{rev.get('google', {}).get('rating', '-')} stars")
          if known else "Google:   " + listing_confirm.reason(target),
-        f"Facebook: {'Page found' if rev.get('facebook', {}).get('url') else 'Not found'}",
-        f"Yelp:     {rev.get('yelp', {}).get('count') or '?'} reviews"
-        f" {'(page found)' if rev.get('yelp', {}).get('url') else '(not found)'}",
+        "Facebook: " + _snapshot_line(rev.get("facebook"), "Page found", "Not found"),
+        "Yelp:     " + _snapshot_line(
+            rev.get("yelp"), "%s reviews (page found)" % ((rev.get("yelp") or {}).get("count") or "?"), "Not found"),
     ]
     print_section("REVIEWS SNAPSHOT:", rev_lines)
 
@@ -1295,7 +1296,7 @@ def run_health_check(business, cities, state, listing=None):
     elapsed = round(time.time() - started, 1)
     bar = "=" * 60
     print(bar)
-    print(f"OVERALL GRADE: {overall}    (scan time: {elapsed}s)")
+    print(f"OVERALL GRADE: {measured.grade_text(overall)}    (scan time: {elapsed}s)")
     print(bar)
     print()
     sys.stdout.flush()
