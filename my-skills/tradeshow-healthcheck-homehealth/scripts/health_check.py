@@ -561,7 +561,7 @@ def check_seo_per_bucket(business, website, buckets, own_cids=(), state=""):
                 [
                     sys.executable, str(serp_script),
                     "--business", business,
-                    "--domain", biz_domain,
+                    "--domain", website or "",      # the whole listing website: a page on a company-wide site (W8)
                     # Town AND state, like home care and franchise (Welton 2026-10-21): a bare
                     # town skips the out-of-state guard in geocode_city_osm.
                     "--city", f"{geo_city} {state}".strip(),
@@ -634,6 +634,7 @@ def check_seo_per_bucket(business, website, buckets, own_cids=(), state=""):
             "rank": match.get("rank"),
             # No website to compare: no result can be called theirs (scripts/measured.py).
             "organic_error": match.get("organic_error"),
+            "organic_maybe": match.get("organic_maybe"),
             "top_3": top_3,
             "ads": raw_ads,
             "local_pack": match.get("local_pack") or {
@@ -831,13 +832,19 @@ def build_ads_per_bucket(business, competitors, seo_per_bucket, prospect_website
         names, unnamed, comp_names = ads_words.advertisers(ads_list, competitors, business, prospect_website)
 
         prospect_match = None
+        prospect_site_maybe = None
         # 1) Domain-only match
+        # Theirs by its address (scripts/measured.py page_verdict, W8): their whole domain, or
+        # their own page on a company-wide site. Elsewhere on that site: could not confirm.
         if prospect_domain:
             for adv in ads_list:
-                ad_domain = normalize_domain((adv or {}).get("domain", ""))
-                if ad_domain and ad_domain == prospect_domain:
-                    prospect_match = (adv or {}).get("name", ad_domain)
+                v = measured.page_verdict((adv or {}).get("url") or (adv or {}).get("domain", ""),
+                                          prospect_website)
+                if v == measured.THEM:
+                    prospect_match = (adv or {}).get("name") or (adv or {}).get("domain", "")
                     break
+                if v == measured.CANT_TELL and prospect_site_maybe is None:
+                    prospect_site_maybe = (adv or {}).get("domain", "")
         # 2) Name-based fallback when domain field is empty
         # 2) A name alone is not proof (Welton 2026-10-20; prospect_identity's rule). An ad under their
         # name with no readable link, or when their own site is unknown, MAY be theirs: never "seen",
@@ -855,6 +862,9 @@ def build_ads_per_bucket(business, competitors, seo_per_bucket, prospect_website
                     break
 
         comp_hits = [{"name": n} for n in comp_names]
+        prospect_maybe_site = bool(not prospect_match and not prospect_maybe and prospect_site_maybe)
+        if prospect_maybe_site:
+            prospect_maybe = prospect_site_maybe
 
         out[label] = {
             "prospect_running_ads": bool(prospect_match),
@@ -865,6 +875,7 @@ def build_ads_per_bucket(business, competitors, seo_per_bucket, prospect_website
             "competitors_running_ads": comp_hits,
             # No website: their ad cannot be recognized by its link (scripts/measured.py).
             "theirs_unknown": not prospect_domain,
+            "prospect_maybe_site": prospect_maybe_site,
             # Derived from the SAME per-city SERP record, so it inherits that
             # record's failure. Without this the ads row reads a failed fetch
             # as an empty ad block and prints "No ads detected" -- a finding
@@ -1160,7 +1171,7 @@ def run_health_check(business, cities, state, listing=None):
             # here tells a prospect they rank nowhere when nothing was measured,
             # the fabricated finding the 3-Pack row above already refuses.
             seo_lines.append(
-                f"{b}: Couldn't check this search")
+                f"{b}: " + measured.organic_text(d))
             # The row is decided. Without this the loop falls through and
             # appends a second, contradictory line for the same city.
             continue
