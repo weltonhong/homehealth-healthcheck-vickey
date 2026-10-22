@@ -18,6 +18,7 @@ from pathlib import Path
 import headline
 import listing_confirm
 import ads_words
+import ads_records
 from xml.sax.saxutils import escape
 import measured
 
@@ -439,7 +440,7 @@ def build_pdf(results):
         leftMargin=0.6 * inch,
         rightMargin=0.6 * inch,
         topMargin=0.5 * inch,
-        bottomMargin=2.35 * inch,  # accommodates the 1.85in CTA footer + gap
+        bottomMargin=2.2 * inch,  # the 1.85in CTA footer + a 0.35in gap (2.35 until 2026-10-22: one-page sheets spilled onto a second)
         title=f"Online Health Check - {business}",
         author="Senior Care Marketing Max",
     )
@@ -476,7 +477,7 @@ def build_pdf(results):
         leading=14, spaceAfter=6,
     )
     rec_style = ParagraphStyle(
-        "rec", parent=body, leftIndent=10, bulletIndent=0, spaceAfter=8,
+        "rec", parent=body, leftIndent=10, bulletIndent=0, spaceAfter=8, allowWidows=0,
     )
 
     story = []
@@ -541,7 +542,7 @@ def build_pdf(results):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
     ]))
     story.append(overall_table)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 6))
 
     target = (results.get("google_intel") or {}).get("target") or {}
     pack = results.get("3pack") or {}
@@ -749,10 +750,13 @@ def build_pdf(results):
     story.append(sc)
     # When the searches ran, once under the table (Welton 2026-10-22).
     story.append(Spacer(1, 3))
-    story.append(Paragraph(escape(measured.searched_line(results)), ParagraphStyle(
+    # Google's ad records for their website, one ungraded line in the same note (scripts/ads_records.py,
+    # Welton 2026-10-22): a table row pushed one-page sheets onto a second page.
+    story.append(Paragraph(escape(measured.searched_line(results)) + "<br/>Google Ads: "
+                           + escape(ads_records.line(results.get("ads_records"))), ParagraphStyle(
         "searched", parent=styles["Normal"], fontName="Helvetica-Oblique", fontSize=9, leading=11,
         textColor=colors.black)))
-    story.append(Spacer(1, 14))
+    story.append(Spacer(1, 8))
 
     # Nothing measured to say: no section at all, never a sentence built on a failed search.
     recs = build_recommendations(results)

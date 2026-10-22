@@ -13,6 +13,10 @@ allowed-tools: Bash, Read, Write, AskUserQuestion
 > one" with "(ranked above you: ...)" naming only nearby Google listings whose own websites ranked above them; one
 > line under the table gives the time all searches ran. The overall grade rests on reviews, the map pack and the
 > website, never on organic rank.
+> **Ads (Welton 2026-10-22, later):** one ungraded line from Google's Ads Transparency Center for their website's
+> domain (US, last 30 days; scripts/ads_records.py): "Google's ad records show no ads for their website in the last
+> 30 days." or "... show ads ..."; "Couldn't tell" for a website shared with other locations (franchises);
+> "Couldn't check" when the read fails. Ads pointing at another domain are invisible to it.
 
 # TRADESHOW HEALTH CHECK - HOME HEALTH
 
