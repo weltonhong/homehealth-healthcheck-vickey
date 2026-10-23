@@ -361,20 +361,27 @@ def check_about_team(home_html, base_url):
 # ----------------------------- 4. Intake form / scheduling -----------------------------
 
 SCHEDULING_HINTS = [
-    "calendly.com", "acuityscheduling", "squareup.com/appointments",
-    "jotform.com", "gravityforms", "wpforms", "wpcf7", "contact-form-7",
-    "hubspot.com/forms", "hsforms.com", "typeform.com", "ninjaforms",
-    "formstack", "fluentform", "wsform", "fluent-form", "gform_wrapper",
-    "elfsight-app-form",
+    # A booking or form service counts only when it is EMBEDDED in this page (Welton 2026-10-22: a Contact link is not
+    # a form): an iframe from it, or the service's own inline-widget element or form-creating call. A plain link to it
+    # is a link. Form plugins (Gravity Forms, WPForms, Contact Form 7, Ninja, Fluent) are not listed: a form they draw
+    # is a real <form> on the page, counted below, and their files load on every page of a site whether or not this
+    # page has a form.
+    "calendly.com", "acuityscheduling", "squareup.com/appointments", "jotform.com", "typeform.com", "formstack",
+    "hsforms", "hubspot.com/forms",
 ]
+EMBED_MARKERS = ("calendly-inline-widget", "hbspt.forms.create", "data-tf-widget", "data-tf-live")
 
 
 def check_intake_form(html):
-    """Pass if a real intake form (3+ visible fields) or scheduling widget."""
-    html_lower = html.lower()
-    for h in SCHEDULING_HINTS:
-        if h in html_lower:
+    """Pass only on a form ON THIS PAGE: a <form> with 3+ visible fields (a popup form built into the page counts), or
+    a scheduling / form service embedded here. One identical function in the three booth tools that carry it
+    (test_booth_form_check.py)."""
+    for m in re.finditer(r"<iframe\b[^>]*\bsrc=[\"']([^\"']+)", html, re.IGNORECASE):
+        if any(h in m.group(1).lower() for h in SCHEDULING_HINTS):
             return True
+    html_lower = html.lower()
+    if any(mk in html_lower for mk in EMBED_MARKERS):
+        return True
     forms = re.findall(r"<form\b[^>]*>(.*?)</form>", html, re.IGNORECASE | re.DOTALL)
     for form in forms:
         form_low = form.lower()

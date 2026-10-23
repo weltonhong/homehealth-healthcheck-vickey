@@ -30,7 +30,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
 )
 from reportlab.lib.utils import ImageReader
 
@@ -672,7 +672,8 @@ def build_pdf(results):
         bits = []
         bits.append("Real photos: " + _web_answer(wc.get("real_photos"), "No (stock)"))
         if psi_score is not None:
-            bits.append(f"PageSpeed: {measured.speed_text(web)}/100")
+            bits.append(f"PageSpeed: {measured.speed_text(web)}/100"
+                        + (f" ({len(web['pagespeed_runs'])} tests today)" if web.get("pagespeed_runs") else ""))
         else:
             bits.append("PageSpeed: Couldn't check")
         bits.append("Team page: " + _web_answer(wc.get("about_team_page"), "No"))
@@ -789,10 +790,11 @@ def build_pdf(results):
     # Nothing measured to say: no section at all, never a sentence built on a failed search.
     recs = build_recommendations(results)
     CTAFooterCanvas.gaps_measured = bool(recs)
-    if recs:
-        story.append(Paragraph("WHERE YOUR INTAKES ARE GOING", h_section))
-    for rec in recs:
-        story.append(Paragraph(f"&bull; {rec}", rec_style))
+    for i, rec in enumerate(recs):
+        # A bullet never splits across two pages, and the heading travels with the first one (Welton 2026-10-22:
+        # a line and a half of a bullet sat alone on page 3; the heading alone ended a page).
+        story.append(KeepTogether(([Paragraph("WHERE YOUR INTAKES ARE GOING", h_section)] if i == 0 else [])
+                                  + [Paragraph(f"&bull; {rec}", rec_style)]))
     story.append(Spacer(1, 10))
 
     try:
