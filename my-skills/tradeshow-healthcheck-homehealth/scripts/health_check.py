@@ -1091,7 +1091,7 @@ def run_health_check(business, cities, state, listing=None):
     print_section(
         "GOOGLE REVIEWS:",
         [
-            (f"{target_count} reviews, {target_rating if target_rating is not None else '-'} stars"
+            (f"{target_count} {measured.reviews_word(target_count)}, {target_rating if target_rating is not None else '-'} stars"
              if known else listing_confirm.reason(target))
         ],
     )
@@ -1113,7 +1113,7 @@ def run_health_check(business, cities, state, listing=None):
                 "MOST-REVIEWED NEARBY LISTING:",
                 [
                     f"{top_comp.get('name', '?')}: "
-                    f"{top_comp.get('review_count') or 0} reviews, "
+                    f"{top_comp.get('review_count') or 0} {measured.reviews_word(top_comp.get('review_count') or 0)}, "
                     f"{top_comp.get('rating') or '-'} stars"
                 ],
             )
@@ -1122,7 +1122,7 @@ def run_health_check(business, cities, state, listing=None):
             if gap > 0:
                 print_section(
                     "REVIEW GAP:",
-                    [f"{gap} reviews behind"],
+                    [f"{gap} {measured.reviews_word(gap)} behind"],
                 )
                 results["review_gap"] = gap
 
@@ -1227,7 +1227,8 @@ def run_health_check(business, cities, state, listing=None):
         seo_lines.append(f"{b}: " + measured.organic_line(d, d.get("door"), measured.town_of(b)))
     seo_lines += [n for n in [measured.office_note([(seo.get(k) or {}).get("door") for k in bucket_labels])] if n]
     seo_lines.append(measured.searched_line(results))
-    seo_lines.append(f"Grade: {measured.grade_text(seo_grade)}")
+    seo_lines.append(measured.SEO_NOT_GRADED if measured.seo_not_graded(results, seo_grade)
+                     else f"Grade: {measured.grade_text(seo_grade)}")
     print_section("GOOGLE ORGANIC RANKINGS (SEO):", seo_lines)
     results["seo_grade"] = seo_grade
 
@@ -1298,12 +1299,12 @@ def run_health_check(business, cities, state, listing=None):
     # Print Reviews snapshot
     rev = results.get("reviews", {})
     rev_lines = [
-        (f"Google:   {rev.get('google', {}).get('count', '-')} reviews, "
+        (f"Google:   {rev.get('google', {}).get('count', '-')} {measured.reviews_word(rev.get('google', {}).get('count', '-'))}, "
          f"{rev.get('google', {}).get('rating', '-')} stars")
          if known else "Google:   " + listing_confirm.reason(target),
         "Facebook: " + _snapshot_line(rev.get("facebook"), "Page found", "No page turned up in our search"),
         "Yelp:     " + _snapshot_line(
-            rev.get("yelp"), ("%s reviews (page found)" % rev["yelp"]["count"]) if (rev.get("yelp") or {}).get("count")
+            rev.get("yelp"), ("%s %s (page found)" % (rev["yelp"]["count"], measured.reviews_word(rev["yelp"]["count"]))) if (rev.get("yelp") or {}).get("count")
             else "Page found (review count not read)", "No page turned up in our search"),
     ]
     print_section("REVIEWS SNAPSHOT:", rev_lines)
