@@ -661,10 +661,10 @@ def check_seo_per_bucket(business, website, buckets, own_cids=(), state="", list
     # The same searches from the prospect's own address, alongside (Welton 2026-10-22). Each row keeps its
     # town-centre answer where every reader looks, and the office answer beside it as "door".
     door_pool = ThreadPoolExecutor(max_workers=max(1, len(buckets))) if door else None
-    door_futs = [door_pool.submit(run_one, k, door) for k in buckets] if door else []
+    door_futs = [door_pool.submit(measured.double_read, run_one, k, door, split=measured.SPLIT_READS_OFFICE) for k in buckets] if door else []
     out = {}
     with ThreadPoolExecutor(max_workers=max(1, len(buckets))) as ex:
-        futures = [ex.submit(run_one, b) for b in buckets]
+        futures = [ex.submit(measured.double_read, run_one, b) for b in buckets]
         # One line per CITY, not per bucket. A bucket label carries our
         # query structure ("cremation / Chattanooga"); the rep's screen
         # should show the town, not the plumbing. A city is announced
