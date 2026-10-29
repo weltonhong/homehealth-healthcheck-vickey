@@ -982,24 +982,13 @@ def grade_3pack_multi(pack):
     return grade_count_based(sum(1 for r in rows if r.get("in_3_pack")), len(rows))
 
 
-def grade_seo_multi(seo_per_bucket):
-    buckets = [b for b in seo_per_bucket
-               if not measured.organic_failed(seo_per_bucket.get(b))]
-    total = len(buckets)
-    found = 0
-    for b in buckets:
-        rank = (seo_per_bucket.get(b) or {}).get("rank")
-        if rank is not None and rank <= 10:
-            found += 1
-    return grade_count_based(found, total)
-
 
 def grade_ads_multi(ads_per_bucket):
     """Not graded (Welton 2026-10-21): one look per search shows what was seen, not whether they advertise.
     An F from one look was a claim nothing measured, and an A from one look is no stronger; the row reports
     what was seen (scripts/ads_words.py) and the overall grade is over the graded rows."""
     return None
-    # Same reasoning as grade_3pack_multi and grade_seo_multi: one we
+    # Same reasoning as grade_3pack_multi: one we
     # could not scan is not one they are absent from, so it leaves the
     # denominator entirely. This grader never had that filter.
     buckets = [k for k in ads_per_bucket
