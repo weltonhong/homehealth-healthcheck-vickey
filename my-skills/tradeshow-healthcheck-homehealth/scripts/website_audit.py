@@ -199,6 +199,10 @@ def find_internal_link_by_path(html, base_url, paths):
     return None
 
 
+def _host(url):
+    return (urllib.parse.urlparse(url).hostname or "").lower().removeprefix("www.")
+
+
 def fetch_aux_pages(home_html, base_url, paths, timeout=8):
     """Crawl one level deep on the given paths. For each path:
       1. Try to find a matching href on the homepage (loose substring match).
@@ -220,6 +224,11 @@ def fetch_aux_pages(home_html, base_url, paths, timeout=8):
             or find_internal_link_by_path(home_html or "", base_url, [path])
         )
         if not url:
+            continue
+        if _host(url) != _host(base_url):
+            # Another site's page says nothing about this agency (Masonic Home's link to cms.gov read as its own
+            # star rating). Not read, and counted as not read: a No that needed it becomes "couldn't check".
+            _note_unread(url, "another site")
             continue
         # Normalize: strip trailing slash, lowercase host for dedup
         key = url.rstrip("/").lower()
@@ -483,6 +492,14 @@ MEDICARE_CERT_PATTERNS = [
     r"joint\s+commission[\s\-]+accredit\w*",
     r"joint\s+commission\s+accreditation",
     r"accredited\s+by\s+(?:chap|achc|the\s+joint\s+commission)",
+    # Measured on 52 real sites (Welton 2026-10-29): "Medicare and Medicaid certified" (Northern Counties), "Joint
+    # Commission Certified" (Valley Regional), and a CMS star rating, which states certification (Welton: "A CMS
+    # 5-Star rating counts as stating Medicare certification. 'We accept Medicare' does not."): "5-Star Medicare
+    # Rating", "rated as 5-Star provider by Medicare", "Medicare 5-Star Rated", "5-Star ... by the Centers for Medicare".
+    r"medicare\s+(?:and|&amp;|&)\s+medicaid[\s\-]+certified",
+    r"joint\s+commission[\s\-]+certified",
+    r"\b(?:[1-5]|five)[\s\-]+star\b[^.!?]{0,60}\b(?:medicare|centers\s+for\s+medicare)\b",
+    r"\bmedicare\s+(?:[1-5]|five)[\s\-]+star\b",
 ]
 MEDICARE_AUX_PATHS = [
     "/medicare", "/certifications", "/certification", "/our-credentials",
@@ -553,7 +570,24 @@ def detect_services(html):
     for term in HH_SERVICES:
         if term in text and term not in found:
             found.append(term)
+    # Lists and titles (Welton 2026-10-29, measured on 52 real sites): "physical, occupational, or other therapies"
+    # (PathWell) and "LVNs and RNs to Occupational and Speech Therapists" (Home Care Plus) name the services too.
+    for m in _THERAPY_LIST.finditer(text):
+        for word in ("physical", "occupational", "speech"):
+            if re.search(r"\b%s\b" % word, m.group(1)) and word + " therapy" not in found:
+                found.append(word + " therapy")
+    for m in _NURSE_TITLE.finditer(text):
+        term = _NURSE_TITLES[m.group(1)]
+        if term not in found:
+            found.append(term)
     return found
+
+
+# "physical, occupational, or other therapies", "occupational and speech therapists", "physical & speech therapy"
+_THERAPY_LIST = re.compile(r"\b((?:physical|occupational|speech)(?:\s*,?\s*(?:and|or|&)?\s*"
+                           r"(?:physical|occupational|speech|other))*)\s+therap")
+_NURSE_TITLES = {"rn": "registered nurse", "lvn": "licensed vocational nurse", "lpn": "licensed practical nurse"}
+_NURSE_TITLE = re.compile(r"\b(rn|lvn|lpn)s\b")    # plural only: "Christina Stilwell, LPN" is a person, not a service
 
 
 def check_services_list(home_html, base_url):
@@ -563,12 +597,15 @@ def check_services_list(home_html, base_url):
     homepage only mentions one or two."""
     found = set(detect_services(home_html))
 
-    for _, page_html in fetch_aux_pages(home_html or "", base_url, SERVICES_AUX_PATHS, timeout=10):
+    for page_url, page_html in fetch_aux_pages(home_html or "", base_url, SERVICES_AUX_PATHS, timeout=10):
+        if re.search(r"career|/jobs?\b|employment", urllib.parse.urlparse(page_url).path.lower()):
+            continue    # "/care" also matches "/careers": a job ad ("hires RNs, LPNs, PT, OT") is not a service list
         found.update(detect_services(page_html))
 
     # Bucket related terms so we count distinct disciplines, not synonyms
     buckets = {
-        "skilled_nursing": {"skilled nursing", "registered nurse", "rn services", "lpn services"},
+        "skilled_nursing": {"skilled nursing", "registered nurse", "rn services", "lpn services",
+                            "licensed vocational nurse", "licensed practical nurse"},
         "pt": {"physical therapy", "physical therapist"},
         "ot": {"occupational therapy", "occupational therapist"},
         "st": {"speech therapy", "speech-language pathology", "speech-language"},
@@ -610,6 +647,11 @@ REFERRAL_BODY_HINTS = [
 ]
 
 
+_LINK = re.compile(r"<a\b([^>]*)>(.*?)</a>", re.I | re.S)
+_REFERRAL_LINK = re.compile(r"\breferrals?\b|\brefer\s+a\s+patient\b|\breferring\s+(?:providers?|physicians?)\b")
+_NOT_REFERRAL_LINK = re.compile(r"\bfriends?\b|\bemployee\b|\bcareer|\bjob")
+
+
 def check_referral_page(home_html, base_url):
     """Pass if there's a dedicated referral page reachable via homepage
     href OR direct path probe, OR if referral language is prominent
@@ -620,6 +662,16 @@ def check_referral_page(home_html, base_url):
     if aux_pages:
         # Any referral-named page that fetches 2xx is a pass.
         return True
+
+    # A link on the homepage whose words are a referral (Welton 2026-10-29, measured on 52 real sites): "Submit
+    # Referral", "Referral Form", "For Referring Providers", "Send Your Referrals". Not "Refer Your Friends".
+    # The link's address counts too: Mission and Practicare link "Click Here" to ".../send-your-referrals".
+    for m in _LINK.finditer(home_html or ""):
+        words = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2))).strip().lower()
+        href = re.search(r"""href\s*=\s*["']?([^"'\s>]+)""", m.group(1), re.I)
+        words += " " + re.sub(r"[-_/.]+", " ", href.group(1).lower()) if href else ""
+        if _REFERRAL_LINK.search(words) and not _NOT_REFERRAL_LINK.search(words):
+            return True
 
     # Fallback: prominent referral copy on the homepage (>=2 hints)
     if home_html:

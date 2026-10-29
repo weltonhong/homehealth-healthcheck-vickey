@@ -358,6 +358,17 @@ def _build_recommendations_top2(results):
             f"Google's mobile speed test scored your homepage <b>{measured.speed_text(web)} out of 100</b>. Discharge "
             f"planners and families researching home health on iPhones are left waiting on a page Google scores as slow, and a slow page loses them before it loads."
         ))
+    # Services before Medicare and referral (Welton 2026-10-29): measured on 52 real home health sites, this order put
+    # 5 false website lines on sheets where the old one put 7 (receipt 20261029T084403_booth-website-checks-measured).
+    elif web_checks.get("services_list") is False:
+        score = 55
+        candidates.append((score,
+            f"Your website is vague about what services you actually offer "
+            f"(skilled nursing, PT, OT, ST, medical social work, home health "
+            f"aide, wound care, IV therapy). When discharge planners can't "
+            f"see what is available, they assume you don't have it and refer "
+            f"to the agency whose website spells it out."
+        ))
     elif web_checks.get("medicare_certified") is False:
         score = 65
         candidates.append((score,
@@ -374,15 +385,6 @@ def _build_recommendations_top2(results):
             f"physicians, or case managers to refer patients. Without a clear "
             f"'Refer a Patient' workflow, discharge planners send their next "
             f"patient to the agency whose form is one click away."
-        ))
-    elif web_checks.get("services_list") is False:
-        score = 55
-        candidates.append((score,
-            f"Your website is vague about what services you actually offer "
-            f"(skilled nursing, PT, OT, ST, medical social work, home health "
-            f"aide, wound care, IV therapy). When discharge planners can't "
-            f"see what is available, they assume you don't have it and refer "
-            f"to the agency whose website spells it out."
         ))
     elif web_checks.get("google_reviews_widget") is False and rc >= 20:
         score = 45
